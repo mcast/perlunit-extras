@@ -1,10 +1,47 @@
 #! /usr/local/bin/perl -wc
 
 package McaTestCase;
+# $Id$
 
 use strict;
 use base 'Test::Unit::TestCase';
 use Data::Dumper;
+
+=head1 NAME
+
+McaTestCase - souped up Test::Unit::TestCase subclass
+
+=head1 SYNOPSIS
+
+ use base 'McaTestCase';
+ sub test_foo {
+   $self->{annotate} = { debug => "stuff", more => "stuff" };
+   $self->assert_dies( qr/dodo/, sub { die "dodo-style" } );
+ }
+
+=head1 DESCRIPTION
+
+This is a mixed bag of stuff collected together to help write test
+cases.  I use it as a base class, it inherits in turn from
+L<Test::Unit::TestCase> .
+
+=head2 Dump debug data when needed
+
+During C<tear_down>, will annotate the test with the L<Data::Dumper>
+processed dump of the contents of C<$self-E<gt>{annotate}> , if
+present.  This data will then be seen iff the test fails - handy for
+debugging.
+
+=head2 Tattle on slow tests
+
+Times each test method with the wallclock (L<Time::HiRes> when
+available), prints summary of slow tests during C<END> block.  Slow is
+defined as taking more than 3x the average wall-clock time of all the
+tests.  It's designed to keep quiet unless there are hogs to report
+on.
+
+=cut
+
 
 # inherit perfectly adequate new, set_up
 my %test_times; # key="testclass->test_name", value = [ starttime, endtime ]
@@ -13,18 +50,6 @@ my $hi_time;
 BEGIN {
     $begin_T = $^T;
     $hi_time = eval "use Time::HiRes; 1";
-}
-
-# This fixes the problem described at
-#  http://sourceforge.net/tracker/index.php?func=detail&aid=1014540&group_id=2653&atid=102653
-# (perlunit.sf.net bug number 1014540)
-BEGIN {
-    warn "Sick bodge over Test::Unit v0.24";
-    sub Test::Unit::Assert::is_numeric {
-	my $str = shift;
-	local $^W;
-	return defined $str && ! ($str == 0 && $str !~ /^\s*[+-]?0(e0)?\s*$/i);
-    }
 }
 
 
@@ -89,6 +114,39 @@ END {
 	   @timings)
       if @timings;
 }
+
+
+=head2 Extra C<assert_*> methods
+
+These can be used in the usual way.
+
+=over 4
+
+=item C<assert_dies( qr/message regex/, @coderefs )>
+
+Run each piece of code.  Assert that each one dies, and that the
+resulting error message matches the regex.
+
+=item C<assert_samerefs([$expect_object1, $expect_object2], [$actual_object1, $actual_object2 ], $descr)>
+
+First two args must be lists, items in the list are compared with
+'=='.  Purpose is for checking a bunch of references point to the
+expected places.
+
+C<$descr> will be set to the calling file:line unless a description is
+given.  Descriptions are prepended to "expected foo, got spong"-style
+failure messages.
+
+=back
+
+=head2 Self-tests
+
+Includes tests of its new C<assert_*> methods, these will piggyback on
+each of your test classes.  If this turns out to be a major time
+waster then I'll move them.
+
+=cut
+
 
 # Assert that each coderef dies with a message matching the regex
 sub assert_dies {
@@ -204,4 +262,33 @@ sub test_baseselftest_assert_samerefs {
 }
 
 
+=head2 Hack-around for v0.24 C<Test::Unit::Assert::is_numeric> problem
+
+Redefines the subroutine to be more strict.  Hopefully a temporary
+measure.
+
+This fixes the problem described at
+L<http://sourceforge.net/tracker/index.php?func=detail&aid=1014540&group_id=2653&atid=102653>
+(perlunit.sf.net bug number 1014540)
+
+=cut
+
+BEGIN {
+    warn "Sick bodge over Test::Unit v0.24";
+    sub Test::Unit::Assert::is_numeric {
+	my $str = shift;
+	local $^W;
+	return defined $str && ! ($str == 0 && $str !~ /^\s*[+-]?0(e0)?\s*$/i);
+    }
+}
+
+
 1;
+
+
+
+=head1 AUTHOR
+
+Matthew Astley <mca@sanger.ac.uk> 2004-08ish
+
+=cut

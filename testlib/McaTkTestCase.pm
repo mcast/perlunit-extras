@@ -25,9 +25,13 @@ my $get_priv = sub {
  #     return $S->{$what} || 0;
  # }
 
+# Ensure windows are destroyed before we leave.
+# Note that further exceptions thrown here will mask failures generated in the testcase itself.
 sub tear_down {
     my $self = shift;
     my $P = $get_priv->($self);
+
+    $self->SUPER::tear_down;
 
     # Ensure again that windows are gone
     my @zapped;
@@ -35,12 +39,16 @@ sub tear_down {
 	push @zapped, $win;
 	$win->destroy;
     }
-    $self->assert_str_equals("()", "(@zapped)");
+    my $name = $self->name;
+    my $msg = "$name/tear_down: Windows zapped=(@zapped)\n";
+    if (@zapped) {
+	$self->annotate($msg);
+	warn $msg;
+    }
+#    $self->assert_str_equals("()", "(@zapped)");
 
     # Last bail-out check
     $self->bail_check("**LATE** Bail-out check during tear_down");
-
-    $self->SUPER::tear_down;
 }
 
 
@@ -119,6 +127,22 @@ sub tk_pokekeysym {
 #	$self->delay($win, $delay);
 #	$win->after($delay) if $delay;
     }
+}
+
+
+# Run the Tk event loop until the first window has gone away
+# or we hit the timeout.  Then check for bailout (may fail).
+# Args = timeout in milliseconds
+sub run_with_timeout {
+    my ($self, $millis) = @_;
+    my ($mw) = $self->tk_windows;
+
+    # Sledgehammer, in case it goes wrong
+    $mw->after($millis, sub { $self->bail("timeout") });
+
+    $mw->waitWindow; # wait for our window's destruction
+
+    $self->bail_check;
 }
 
 

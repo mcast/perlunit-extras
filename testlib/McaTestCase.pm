@@ -122,10 +122,11 @@ These can be used in the usual way.
 
 =over 4
 
-=item C<assert_dies( qr/message regex/, @coderefs )>
+=item C<assert_dies( qr/message regex/, @coderefs, $descr])>
 
 Run each piece of code.  Assert that each one dies, and that the
-resulting error message matches the regex.
+resulting error message matches the regex.  Extra description
+C<$descr> is optional.
 
 =item C<assert_samerefs([$expect_object1, $expect_object2], [$actual_object1, $actual_object2 ], $descr)>
 
@@ -161,6 +162,11 @@ sub assert_dies {
     my @caller = caller();
     my $caller = "caller at $caller[1] line $caller[2]";
 
+    if (@coderef > 1 && !ref($coderef[-1])) {
+	# Last item isn't code, take it as an extra piece of message
+	$caller .= ", ".pop(@coderef);
+    }
+
     $self->fail("arg1 not Regexp from $caller") unless ref($regex) eq 'Regexp';
     $self->fail("Bad args (no coderefs) from $caller") unless @coderef;
     $self->fail("Bad args (coderefs aren't) from $caller") if grep {ref($_) ne 'CODE'} @coderef;
@@ -170,8 +176,11 @@ sub assert_dies {
 	    $coderef[$i]->();
 	};
 	my $err = $@;
-	$self->fail("Code#$i did not die, $caller") unless $err;
-	$self->assert_matches($regex, "Code#$i '$err', $caller");
+	my $which = "";
+	$which = join "", "[", $i+1, " of ", scalar @coderef, "]" if @coderef > 1;
+	$self->fail("Code$which did not die, $caller") unless $err;
+	$self->assert_matches($regex, $err,
+			      "Code$which, $caller:\n  Died with '$err'\n  which didn't match $regex");
     }
 }
 
@@ -194,10 +203,17 @@ sub test_baseselftest_assert_dies {
 			     $self->assert_dies( qr/wibble/, sub { return 1; });
 			 });
 
-    # wrong arg
+    # wrong args
     $self->assert_raises('Test::Unit::Failure',
 			 sub {
 			     $self->assert_dies( "foo", sub { return 1; });
+			 });
+    $self->assert_raises('Test::Unit::Failure',
+			 sub {
+			     $self->assert_dies( qr/foo/,
+						 sub { return 1; },
+						 "This is not code",
+						 "Could be a message?");
 			 });
 
     # multi coderef, second has wrong message
@@ -217,6 +233,31 @@ sub test_baseselftest_assert_dies {
 						 sub { return 1; });
 			 });
 
+    # old bug check
+    $self->assert_raises('Test::Unit::Failure',
+			 sub {
+			     $self->assert_dies( qr/caller/i,
+						 sub { die "some other thing" } );
+			 });
+
+    # Check the error messages are useful
+    # Working so far, so can use the method under test!
+    $self->assert_dies( qr/Code\[2 of 2\]/,
+			sub {
+			    $self->assert_dies( qr/butter/,
+						sub { die "butterfingers" },
+						sub { die "aiee" });
+			}, sub {
+			    $self->assert_dies( qr/oops/,
+						sub { die "oops" },
+						sub { return 1 });
+			});
+    $self->assert_dies( qr/vital/,
+			sub {
+			    $self->assert_dies( qr/foo/,
+						sub { die "unhelpful message" },
+						"vital piece of info");
+			});
 }
 
 

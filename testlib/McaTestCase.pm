@@ -226,13 +226,13 @@ sub assert_samerefs {
     my @c = caller();
     $descr = "$c[1]:$c[2]" unless defined $descr;
 
-    $self->assert_equals(0, scalar @more, "$descr: too many args");
-    $self->assert_equals('ARRAY', ref($expect_list), "$descr: bad expect");
-    $self->assert_equals('ARRAY', ref($actual_list), "$descr: bad actual");
+    $self->assert_str_equals(0, scalar @more, "$descr: too many args");
+    $self->assert_str_equals('ARRAY', ref($expect_list), "$descr: bad expect");
+    $self->assert_str_equals('ARRAY', ref($actual_list), "$descr: bad actual");
     $self->fail("$descr: compared to itself") if $actual_list == $expect_list;
     my $en = scalar @$expect_list;
     my $an = scalar @$actual_list;
-    $self->assert_equals($en, $an, "$descr: expect $en, got $an");
+    $self->assert_str_equals($en, $an, "$descr: expect $en, got $an");
     for (my $i=0; $i<$en; $i++) {
 	my $e = $expect_list->[$i];
 	my $a = $actual_list->[$i];
@@ -267,11 +267,15 @@ sub test_baseselftest_assert_samerefs {
 
 
 sub assert_is_idnum {
-    my ($self, $id) = @_;
+    my ($self, $id, $descr, @more) = @_;
+    my @c = caller();
+    $descr = "$c[1]:$c[2]" unless defined $descr;
 
-    $self->assert_not_null($id);
-    $self->assert_matches(qr/^\d+$/, $id);
-    $self->assert_str_equals("", ref($id));
+    $self->assert_str_equals(0, scalar @more, "$descr: too many args");
+    $self->assert_not_null($id, "$descr: Was null");
+    $self->assert_str_equals("", ref($id), "$descr: '$id' is a ref");
+    $self->fail("$descr: '$id' is a ref") if ref($id);
+    $self->assert_matches(qr/^\d+$/, $id, "$descr: '$id' contains non-numeric");
 }
 
 sub test_baseselftest_assert_is_idnum {
@@ -282,11 +286,13 @@ sub test_baseselftest_assert_is_idnum {
     }
 
     foreach my $not_id (undef, "eek", "", "_", "5.0", -5) {
-	$self->assert_raises('Test::Unit::Failure',
-			     sub {
-				 $self->assert_is_idnum($not_id);
-			     });
+	$self->assert_raises('Test::Unit::Failure', sub {
+	    $self->assert_is_idnum($not_id);
+	});
     }
+
+    $self->assert_dies(qr/descrstring/, sub { $self->assert_is_idnum("wibble", "descrstring") });
+    $self->assert_dies(qr/too many args/, sub { $self->assert_is_idnum(1, 2, 3) });
 }
 
 

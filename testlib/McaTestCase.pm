@@ -27,7 +27,8 @@ sub assert_dies {
 	$coderef->();
     };
     my $err = $@;
-    $self->fail("Code did not die") unless $err;
+    my @caller = caller();
+    $self->fail("Code did not die, caller at $caller[1] line $caller[2]") unless $err;
     $self->assert_matches( $regex, $err );
 }
 

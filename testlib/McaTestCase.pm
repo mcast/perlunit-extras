@@ -268,7 +268,7 @@ Redefines the subroutine to be more strict.  Hopefully a temporary
 measure.
 
 This fixes the problem described at
-L<http://sourceforge.net/tracker/index.php?func=detail&aid=1014540&group_id=2653&atid=102653>
+http://sourceforge.net/tracker/index.php?func=detail&aid=1014540&group_id=2653&atid=102653
 (perlunit.sf.net bug number 1014540)
 
 =cut
@@ -290,6 +290,6 @@ BEGIN {
 
 =head1 AUTHOR
 
-Matthew Astley <mca@sanger.ac.uk> 2004-08ish
+Matthew Astley E<lt>mca@sanger.ac.ukE<gt> 2004-08ish
 
 =cut

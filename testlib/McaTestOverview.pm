@@ -3,6 +3,9 @@ use strict;
 use Pod::Checker 1.2; # 1.2 with Perl 5.6; 1.4 with Perl 5.8
 use base 'Test::Unit::TestCase';
 
+# $Id$
+our ($VERSION) = (qw$Revision$)[1];
+
 =head1 NAME
 
 McaTestOverview - generic tests to run on a project
@@ -70,7 +73,7 @@ sub test_notes_to_self {
     if (-f $DUMP_FILE && -w _ && open my $fh, ">>$DUMP_FILE") {
 	print $fh "-*- mode: outline; mode: auto-revert -*-\n\n" if -z _;
 	local $, = "";
-	print $fh "* ", "-" x 76, "\nTest started at ".localtime($^T)." ($^T)\n\n";
+	print $fh "-" x 76, "\n\n* ".localtime($^T)." ($^T) with v$VERSION\n\n";
 	print $fh @output;
 	$dest = "appended to $DUMP_FILE";
     } else {

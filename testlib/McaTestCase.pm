@@ -137,6 +137,10 @@ C<$descr> will be set to the calling file:line unless a description is
 given.  Descriptions are prepended to "expected foo, got spong"-style
 failure messages.
 
+=item C<assert_is_idnum($database_id)>
+
+C<$database_id> must be a plain non-negative integer.
+
 =back
 
 =head2 Self-tests
@@ -259,6 +263,30 @@ sub test_baseselftest_assert_samerefs {
 			     $self->assert_samerefs( \@o, [ 34, [78], $o[2] ] ); # [78] is different
 			 });
     $self->assert_samerefs( \@o, [ 34, $o[1], $o[2] ] ); # [78] is different
+}
+
+
+sub assert_is_idnum {
+    my ($self, $id) = @_;
+
+    $self->assert_not_null($id);
+    $self->assert_matches(qr/^\d+$/, $id);
+    $self->assert_str_equals("", ref($id));
+}
+
+sub test_baseselftest_assert_is_idnum {
+    my $self = shift;
+
+    foreach my $id ("0", "634535345345", 5 .. 10) {
+	$self->assert_is_idnum($id);
+    }
+
+    foreach my $not_id (undef, "eek", "", "_", "5.0", -5) {
+	$self->assert_raises('Test::Unit::Failure',
+			     sub {
+				 $self->assert_is_idnum($not_id);
+			     });
+    }
 }
 
 

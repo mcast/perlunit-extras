@@ -137,7 +137,7 @@ C<$descr> will be set to the calling file:line unless a description is
 given.  Descriptions are prepended to "expected foo, got spong"-style
 failure messages.
 
-=item C<assert_is_idnum($database_id)>
+=item C<assert_is_idnum($database_id, $descr)>
 
 C<$database_id> must be a plain non-negative integer.
 

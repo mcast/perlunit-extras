@@ -37,7 +37,10 @@ sub tear_down {
 
     # Display data structures from testcase, if we fail
     if ($self->{annotate}) {
-	my $d = Data::Dumper->new([values %{ $self->{annotate} }], [keys %{ $self->{annotate} }]);
+	$self->fail("annotate value exists but is not hashref") if ref($self->{annotate}) ne 'HASH';
+	my @keys = sort keys %{ $self->{annotate} };
+	my @vals = map { $self->{annotate}->{$_} } @keys;
+	my $d = Data::Dumper->new(\@vals, \@keys);
 	$d->Indent(1)->Purity(1)->Quotekeys(0);
 	$self->annotate($d->Dump);
     }

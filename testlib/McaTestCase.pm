@@ -145,4 +145,50 @@ sub test_baseselftest_assert_dies {
 }
 
 
+# Compare two lists of refs (or numbers) for '==' equality
+sub assert_samerefs {
+    my ($self, $expect_list, $actual_list, $descr, @more) = @_;
+    my @c = caller();
+    $descr = "$c[1]:$c[2]" unless defined $descr;
+
+    $self->assert_equals(0, scalar @more, "$descr: too many args");
+    $self->assert_equals('ARRAY', ref($expect_list), "$descr: bad expect");
+    $self->assert_equals('ARRAY', ref($actual_list), "$descr: bad actual");
+    $self->fail("$descr: compared to itself") if $actual_list == $expect_list;
+    my $en = scalar @$expect_list;
+    my $an = scalar @$actual_list;
+    $self->assert_equals($en, $an, "$descr: expect $en, got $an");
+    for (my $i=0; $i<$en; $i++) {
+	my $e = $expect_list->[$i];
+	my $a = $actual_list->[$i];
+	$self->fail("$descr: Items at #$i ($e, $a) not same object")
+	  unless $a == $e;
+    }
+}
+
+sub test_baseselftest_assert_samerefs {
+    my $self = shift;
+    my @o = ( 34, [ 78 ], { foo => 'bar' } );
+
+    $self->assert_samerefs([ @o ], [ @o ]);
+    $self->assert_samerefs([ @o ], [ @o ], "with message");
+
+    $self->assert_raises('Test::Unit::Failure',
+			 sub {
+			     $self->assert_samerefs( \@o, \@o ); # compare list to itself - weird
+			 });
+
+    $self->assert_raises('Test::Unit::Failure',
+			 sub {
+			     $self->assert_samerefs( \@o, [ ] ); # lists wrong size
+			 });
+
+    $self->assert_raises('Test::Unit::Failure',
+			 sub {
+			     $self->assert_samerefs( \@o, [ 34, [78], $o[2] ] ); # [78] is different
+			 });
+    $self->assert_samerefs( \@o, [ 34, $o[1], $o[2] ] ); # [78] is different
+}
+
+
 1;

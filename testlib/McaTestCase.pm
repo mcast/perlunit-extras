@@ -40,7 +40,7 @@ sub assert_dies {
 	};
 	my $err = $@;
 	$self->fail("Code#$i did not die, $caller") unless $err;
-	$self->assert_matches($regex, "Code#$i '$err'");
+	$self->assert_matches($regex, "Code#$i '$err', $caller");
     }
 }
 

@@ -31,9 +31,8 @@ Look for lines containing reminder comments in source files, while
 being careful not to needlessly mention the strings involved in the
 test source.
 
-Search patterns defined include B<X>B<XX:> and the string B<T>B<ODO:>
-, in various combinations of colon, word boundary and case
-sensitivity.
+Search patterns defined include B<X>B<XX:> and the string B<T>B<ODO:>,
+in various combinations of colon, word boundary and case sensitivity.
 
 =cut
 
@@ -51,6 +50,7 @@ sub test_notes_to_self {
 			     }
 			  get_source($filename)
 			);
+	foreach (@marklines) { s/^\s*#?\s*// } # strip leading dullness
 	local $" = "  "; # lines have \n already
 	if (@marklines) {
 	    $self->annotate("In $filename:\n  @marklines\n");
@@ -85,17 +85,20 @@ sub test_podchecker {
 
 	# Line up the text and make a sink for the "no errors found" noise
 	my $in_fh = My::GetlineSource->new(get_source($filename));
-## argh, this is just making local files.
-#	my $junk = "";
-#	open my $out_fh, ">", \$junk or die "Can't open PerlIO::scalar to nowhere";
-# Use /dev/null inste
-	open my $out_fh, ">", "/dev/null" or die "Can't open sink to /dev/null: $!";
+	#DNW: my $in_fh = My::PrintSink->open();
+	#     print $in_fh get_source($filename);
+	my $out_fh = My::PrintSink->open();
+## fallback for unices:
+#	open my $out_fh, ">", "/dev/null" or die "Can't open sink to /dev/null: $!";
 
 	# Do the check, count the problems
 	$checker->parse_from_filehandle($in_fh, $out_fh);
 	my ($e, $w) = ($checker->num_errors, $checker->get_num_warnings);
 	$tot_warns += $w;
 	$tot_errs += abs($e); # -1 indicates no POD
+
+## The sunk output is available but mostly not interesting
+#	$self->annotate(map {"   : $_"} <$out_fh>);
 	if ($e < 0) {
 	    $self->annotate("  E:$filename: No POD found\n\n");
 	} else {
@@ -123,7 +126,8 @@ scalar contexts.
 This is mainly to avoid loading files multiple times for various
 tests.
 
-XXX: does no timestamp checks so you may get a stale version if you call it after the file changed.
+NB. Currently B<does no timestamp checks>, so you may get a stale
+version if you call it after the file changed.
 
 =cut
 
@@ -151,7 +155,12 @@ sub get_loaded_files {
     sort grep {!m{^/usr/}} values %INC
 }
 
+=back
+
+=cut
+
 1;
+
 
 ##############################################################################
 #
@@ -201,8 +210,43 @@ sub takeprob {
 1;
 
 
+# This is just an ARRAY we can use as a filehandle
+# because the POD reader has provision for this method call
 package My::GetlineSource;
 
 sub new { bless [ @_ ], __PACKAGE__ }
 
 sub getline { shift @{ $_[0] } }
+
+
+# Handle which can do a limited set of I/O operations on whole lines
+package My::PrintSink;
+sub open {
+    my $proto = shift;
+    my $class = ref($proto) || $proto;
+
+    local *JUNK;
+    our @JUNK;
+    my $list = bless \@JUNK, $class;
+
+    tie *JUNK, $class, $list;
+    return \*JUNK;
+}
+sub TIEHANDLE {
+    my ($class, $list) = @_;
+    return $list;
+}
+sub PRINT {
+    my $list = shift; # the blessed ARRAYref
+    push @$list, @_;
+}
+sub PRINTF {
+    my $list = shift;
+    my $format = shift;
+    my $txt = sprintf($format, @_); # first arg has scalar context!
+    $list->PRINT($txt);
+}
+sub READLINE {
+    my $list = shift;
+    return wantarray ? splice @$list : shift @$list;
+}

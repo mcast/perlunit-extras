@@ -34,11 +34,17 @@ test source.
 Search patterns defined include B<X>B<XX:> and the string B<T>B<ODO:>,
 in various combinations of colon, word boundary and case sensitivity.
 
+Dumps to ~/tmp/test_notes_to_self.log if that file exists already.
+
 =cut
+
+my $DUMP_FILE = "$ENV{HOME}/tmp/test_notes_to_self.log";
 
 sub test_notes_to_self {
     my $self = shift;
     my @filenames = @{ $self->{sources} };
+
+    my @output;
 
     my $marks = 0;
     my @pats = ( qr/\b[x]xx:(\w*)/i,
@@ -54,13 +60,25 @@ sub test_notes_to_self {
 	foreach (@marklines) { s/^\s*#?\s*// } # strip leading dullness
 	local $" = "  "; # lines have \n already
 	if (@marklines) {
-	    $self->annotate("In $filename:\n  @marklines\n");
+	    push @output, "** In $filename:\n  @marklines\n";
 	    $marks += @marklines;
 	}
     }
-#    $self->annotate(join "\n  ", "----\nFiles scanned:", @filenames);
+#    push @output, join "\n  ", "----\nFiles scanned:", @filenames;
 
-    $self->fail("Found $marks note(s) to self") if $marks;
+    my $dest;
+    if (-f $DUMP_FILE && -w _ && open my $fh, ">>$DUMP_FILE") {
+	print $fh "-*- mode: outline; mode: auto-revert -*-\n\n" if -z _;
+	local $, = "";
+	print $fh "* ", "-" x 76, "\nTest started at ".localtime($^T)." ($^T)\n\n";
+	print $fh @output;
+	$dest = "appended to $DUMP_FILE";
+    } else {
+	$self->annotate(@output);
+	$dest ="annotated below";
+    }
+
+    $self->fail("Found $marks note(s) to self, $dest") if $marks;
 }
 
 

@@ -15,6 +15,19 @@ BEGIN {
     $hi_time = eval "use Time::HiRes; 1";
 }
 
+# This fixes the problem described at
+#  http://sourceforge.net/tracker/index.php?func=detail&aid=1014540&group_id=2653&atid=102653
+# (perlunit.sf.net bug number 1014540)
+BEGIN {
+    warn "Sick bodge over Test::Unit v0.24";
+    sub Test::Unit::Assert::is_numeric {
+	my $str = shift;
+	local $^W;
+	return defined $str && ! ($str == 0 && $str !~ /^\s*[+-]?0(e0)?\s*$/i);
+    }
+}
+
+
 sub time2 {
     if ($hi_time) {
 	return Time::HiRes::tv_interval( [$begin_T,0] );

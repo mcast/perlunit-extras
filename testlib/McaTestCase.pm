@@ -2,6 +2,7 @@
 
 package McaTestCase;
 
+use strict;
 use base 'Test::Unit::TestCase';
 use Data::Dumper;
 

@@ -7,6 +7,30 @@ use base 'Test::Unit::TestCase';
 use Data::Dumper;
 
 # inherit perfectly adequate new, set_up
+my %test_times; # key="testclass->test_name", value = [ starttime, endtime ]
+my $begin_T;
+my $hi_time;
+BEGIN {
+    $begin_T = $^T;
+    $hi_time = eval "use Time::HiRes; 1";
+}
+
+sub time2 {
+    if ($hi_time) {
+	return Time::HiRes::tv_interval( [$begin_T,0] );
+    } else {
+	return time() - $begin_T;
+    }
+}
+
+sub set_up {
+    my $self = shift;
+    $self->SUPER::set_up;
+
+    my $t = $self->global_test_name;
+    warn "Test $t: info already defined?!\n" if defined $test_times{$t};
+    $test_times{$t}->[0] = time2();
+}
 
 sub tear_down {
     my $self = shift;
@@ -19,6 +43,34 @@ sub tear_down {
     }
 
     $self->SUPER::tear_down;
+
+    my $t = $self->global_test_name;
+    $test_times{$t}->[1] = time2();
+}
+
+sub global_test_name { return ref($_[0])."->".$_[0]->name }
+
+END {
+    my $tot_time = time2();
+    $tot_time = 0.1 if $tot_time == 0;
+    my $time_lim = $tot_time / (scalar keys %test_times) * 3;
+    my @timings;
+    foreach my $t (sort keys %test_times) {
+	my ($start, $end) = @{ $test_times{$t} };
+	if (defined $start && defined $end) {
+	    my $elapsed = $end - $start;
+	    push @timings,
+	      sprintf("%-60s %3.1fs %3d%%\n", $t, $elapsed, 100 * $elapsed / $tot_time)
+		if $elapsed > $time_lim;
+	} else {
+	    push @timings, "$t\tdata missing\n";
+	}
+    }
+    print( "-" x 70,
+	   "\nSlow test info (threshold ",
+	   sprintf("%3.1fs)\n", $time_lim),
+	   @timings)
+      if @timings;
 }
 
 # Assert that each coderef dies with a message matching the regex

@@ -68,7 +68,17 @@ sub test_notes_to_self {
 Runs all files through a modified (silent) L<Pod::Checker> and reports
 one failure for any/all warnings, POD absence or error.
 
+The little lexical below (in the code) allows files with certain names
+(currently testcases in my naming scheme) to contain no POD without
+this being an error.
+
+This could be extended or replaced by checking the file for package
+names and seeing whether these are subclasses of
+L<Test::Unit::TestCase>, but that's a bit fancy.
+
 =cut
+
+my $podless_ok_filename = qr{^testlib/[\w/]+[a-z]Test.pm$};
 
 sub test_podchecker {
     my $self = shift;
@@ -94,19 +104,26 @@ sub test_podchecker {
 	# Do the check, count the problems
 	$checker->parse_from_filehandle($in_fh, $out_fh);
 	my ($e, $w) = ($checker->num_errors, $checker->get_num_warnings);
-	$tot_warns += $w;
-	$tot_errs += abs($e); # -1 indicates no POD
 
 ## The sunk output is available but mostly not interesting
 #	$self->annotate(map {"   : $_"} <$out_fh>);
+
+	# Is it reasonable to allow POD-free test cases?  For now, I think yes.
 	if ($e < 0) {
-	    $self->annotate("  E:$filename: No POD found\n\n");
+	    $e = 0 if $filename =~ $podless_ok_filename;
+	}
+
+	if ($e < 0) {
+	    $self->annotate("E:$filename: No POD found\n\n");
 	} else {
 	    my @probs = $checker->takeprob;
 	    local $" = "  "; # lines have \n already
 	    $self->annotate("  @probs\n")
 	      if $e || $w;
 	}
+
+	$tot_warns += $w;
+	$tot_errs += abs($e); # -1 indicates no POD
     }
     $self->fail("Found $tot_errs error(s) and $tot_warns warning(s)") if $tot_errs || $tot_warns;
 }

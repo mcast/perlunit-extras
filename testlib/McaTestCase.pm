@@ -274,7 +274,8 @@ L<http://sourceforge.net/tracker/index.php?func=detail&aid=1014540&group_id=2653
 =cut
 
 BEGIN {
-    warn "Sick bodge over Test::Unit v0.24";
+    warn __PACKAGE__, ": Sick bodge over Test::Unit v0.24\n";
+    no warnings;
     sub Test::Unit::Assert::is_numeric {
 	my $str = shift;
 	local $^W;

@@ -242,7 +242,11 @@ sub open {
     my $proto = shift;
     my $class = ref($proto) || $proto;
 
-    local *JUNK;
+#    local *JUNK;
+# puzzled about globs .. localising this seems to cause the locally
+# tied handle to be lost and the restored glob contents to be used as
+# an unopened file...  so I'm probably reusing the same sink several
+# times
     our @JUNK;
     my $list = bless \@JUNK, $class;
 

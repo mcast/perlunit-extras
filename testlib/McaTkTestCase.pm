@@ -137,10 +137,11 @@ sub run_with_timeout {
     my ($self, $millis) = @_;
     my ($mw) = $self->tk_windows;
 
-    # Sledgehammer, in case it goes wrong
-    $mw->after($millis, sub { $self->bail("timeout") });
-
-    $mw->waitWindow; # wait for our window's destruction
+    if (defined $mw) {
+	# Sledgehammer, in case it goes wrong
+	$mw->after($millis, sub { $self->bail("timeout") });
+	$mw->waitWindow; # wait for our window's destruction
+    }
 
     $self->bail_check;
 }

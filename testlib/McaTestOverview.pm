@@ -41,7 +41,8 @@ sub test_notes_to_self {
     my @filenames = @{ $self->{sources} };
 
     my $marks = 0;
-    my @pats = ( qr/\b[x]xx:/i,
+    my @pats = ( qr/\b[x]xx:(\w*)/i,
+		 qr/\b[x]xx\[(\w+)\]/i,
 		 qr/\b[T]ODO\b|(?i)\b[t]odo[-:]/,
 	       );
     foreach my $filename (@filenames) {

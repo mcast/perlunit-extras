@@ -53,7 +53,8 @@ sub global_test_name { return ref($_[0])."->".$_[0]->name }
 END {
     my $tot_time = time2();
     $tot_time = 0.1 if $tot_time == 0;
-    my $time_lim = $tot_time / (scalar keys %test_times) * 3;
+    my $tests = (scalar keys %test_times) || 1;
+    my $time_lim = $tot_time / $tests * 3;
     my @timings;
     foreach my $t (sort keys %test_times) {
 	my ($start, $end) = @{ $test_times{$t} };

@@ -217,7 +217,13 @@ sub poderror {
     my $self = shift;
     my %opts = (ref $_[0]) ? %{shift()} : ();
 
-    die "Override code doesn't expect \@_ args" if @_; # would these be part of the -msg ?
+    if (@_) {
+	my $extra = join "; ", @_;
+	$opts{-severity} = $1 if $extra =~ s{^\*\*\* (WARNING): }{};
+	@opts{'-line', '-file'} = ($1, $2) if $extra =~ s{ at line (\d+) in file (.+)\n?$}{};
+	$opts{-msg} .= $extra;
+    }
+#    die "Override code doesn't expect \@_ args (@_)" if @_; # would these be part of the -msg ?
 
     my $type = $opts{-severity} eq 'ERROR' ? 'ERROR' : 'WARNING';
     $self->{"_NUM_${type}S"}++;

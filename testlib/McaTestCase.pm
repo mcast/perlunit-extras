@@ -28,6 +28,9 @@ This is a mixed bag of stuff collected together to help write test
 cases.  I use it as a base class, it inherits in turn from
 L<Test::Unit::TestCase> .
 
+It includes its own testsuite in each of yours.  This is false
+laziness on my part, the testsuite should be elsewhere.
+
 =head2 Dump debug data when needed
 
 During C<tear_down>, will annotate the test with the L<Data::Dumper>
@@ -160,6 +163,7 @@ sub dumpnote_weak {
 	$weaks->{$list} = $list;
 	weaken $list->[1];
     }
+    0;
 }
 
 sub dumpnote {
@@ -540,6 +544,41 @@ sub test_baseselftest_assert_is_idnum {
 
     $self->assert_dies(qr/descrstring/, sub { $self->assert_is_idnum("wibble", "descrstring") });
     $self->assert_dies(qr/too many args/, sub { $self->assert_is_idnum(1, 2, 3) });
+}
+
+
+sub assert_isa {
+    my ($self, $obj, @isa) = @_;
+    my @c = caller();
+    my $descr = "$c[1]:$c[2]";
+
+    # Check it's a ref
+    my $what = (defined $obj
+		? (ref($obj) ? ref($obj) : "non-ref")
+		: "undef");
+
+    for (my $i=0; $i<@isa; $i++) {
+	$self->fail("$descr: $what is not a $isa[$i] (isa #$i)") unless UNIVERSAL::isa($obj, $isa[$i]);
+    }
+}
+
+sub test_assert_isa {
+    my $self = shift;
+    $self->assert_raises('Test::Unit::Failure', sub {
+			     $self->assert_isa(undef, "Foo");
+			 }, "Cope with undef");
+    $self->assert_raises('Test::Unit::Failure', sub {
+			     $self->assert_isa(56, "Foo");
+			 }, "Cope with 56");
+    $self->assert_raises('Test::Unit::Failure', sub {
+			     $self->assert_isa({}, "Foo");
+			 }, "Cope with HASH");
+
+    $self->assert_isa($self, qw(McaTestCase Test::Unit::Assert Test::Unit::Test Test::Unit::TestCase));
+
+    $self->assert_raises('Test::Unit::Failure', sub {
+			     $self->assert_isa($self, qw(Test::Unit::Test Gronk Test::Unit::TestCase));
+			 }, "Cope with wrong class");
 }
 
 

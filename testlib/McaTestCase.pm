@@ -49,7 +49,6 @@ on.
 =cut
 
 
-# inherit perfectly adequate new, set_up
 my %test_times; # key="testclass->test_name", value = [ starttime, endtime ]
 my $begin_T;
 my $hi_time;
@@ -75,47 +74,97 @@ sub set_up {
     warn "Test $t: info already defined?!\n" if defined $test_times{$t};
     $test_times{$t}->[0] = time2();
 
-    if (0) {
-	$self->objleak_reset
-	  if Devel::Leak::Object->can('get_status');
-    }
+    $self->DLO_reset if $self->DLO_present;
 }
 
 sub tear_down {
     my $self = shift;
 
+    $self->SUPER::tear_down;
+
+    my $leaked = ($self->{DLO_before}
+		  ? $self->DLO_check
+		  : 0);
+
     # Display data structures from testcase, if we fail
-    if ($self->{annotate}) {
+    if ($self->{annotate} && scalar keys %{ $self->{annotate} }) {
 	$self->fail("annotate value exists but is not hashref") if ref($self->{annotate}) ne 'HASH';
 	$self->_dump_order_add($self->{annotate}); # ensure it will come out sorted, but don't mess with any existing order
 	$self->annotate($self->datadump([ $self->{annotate} ], ['*annotate']));
     }
 
-    $self->SUPER::tear_down;
-
     my $t = $self->global_test_name;
     $test_times{$t}->[1] = time2();
 
-    if (0) {
-	my @leak_ignore = qw(DBI::st B::Deparse SqlEngine2::Exception);
-	# SqlEngine2::Exception stores last-seen exception per package
-	# Test::Unit::Assertion::CodeRef caches one B::Deparse
-	# SqlEngine2 caches many DBI::st
-
-	my $leaked = ($self->{leak_before}
-		      ? $self->objleak_check('tear_down', @leak_ignore)
-		      : 0);
-	$self->fail("Leaked object count = $leaked") if $leaked; # XXX: will mask other failures
-    }
+    $self->fail("Leaked object count = $leaked\nXXX: this will mask other failures, may prevent later parts of tear_down") if $leaked;
 }
 
-sub objleak_reset {
+sub DLO_present { Devel::Leak::Object->can('get_seen') }
+
+sub DLO_reset {
     my $self = shift;
-    $self->{leak_before} = [ Devel::Leak::Object::get_status() ];
+    $self->{DLO_before} = Devel::Leak::Object::get_seen();
     delete $self->{leak_significant};
 }
 
-sub _weak_get_refcnt {
+sub DLO_ignore_class {
+    return ();
+}
+
+sub DLO_leak_annotate { 0 } # override to 1 to dump the laggards
+
+sub DLO_check {
+    my $self = shift;
+    $_ = %_ = @_ = (); # just in case...  no evidence yet that it had been a problem
+
+    my $before = $self->{DLO_before};
+    my $after = Devel::Leak::Object::get_seen();
+    my %after; # key = address, value = [ before-index, after-index, after_class, after_refcnt ]
+    for my $outer (0, 1) {
+	my $list = ($before, $after)[$outer];
+	for (my $i=0; $i<@$list; $i++) {
+	    my ($class,$type,$addr,$refcnt) = Devel::Leak::Object::obj_info($list->[$i]);
+	    my $place = $after{$addr} ||= [];
+	    $place->[$outer] = $i;
+	    if ($outer) {
+		$place->[2] = $class;
+		$place->[3] = $refcnt;
+	    }
+	}
+    }
+
+    my %ignore_class;
+    @ignore_class{($self->DLO_ignore_class)} = ();
+    my (@gone, @leak);
+    foreach my $addr (keys %after) {
+	my ($bef, $aft, $class, $refcnt) = @{ $after{$addr} };
+	# Could detect class change if we wanted to...  would need extra info
+	next if defined $bef && defined $aft;
+	next if exists $ignore_class{$class};
+	if (defined $bef) {
+	    push @gone, $addr;
+	} else {
+	    push @leak, $addr;
+	}
+    }
+
+    $self->annotate("Objects went away after DLO_reset: @gone\n") if @gone;
+    return 0 if !@leak;
+
+    for (my $i=0; $i<@leak; $i++) {
+	# Reformat the @leak list with detail
+	my $addr = $leak[$i];
+	my ($bef, $aft, $class, $refcnt) = @{ $after{$addr} };
+	my $obj = $after->[$aft];
+	$self->dumpnote_weak("DLO_leak_$addr" => $obj) if $self->DLO_leak_annotate;
+	$leak[$i] = sprintf("  %-16s %s refcnt=%d\n", $class, $addr, $refcnt);
+    }
+    $self->annotate(join "", " Leaks detected in DLO_check\n", sort @leak);
+
+    return scalar @leak;
+}
+
+sub _weak_update_refcnt {
     my $self = shift;
     my $h = $self->{weaklist};
     return unless $h;
@@ -197,7 +246,7 @@ sub datadump {
 		     return [ keys %$hashref ];
 		 });
 
-    $self->_weak_get_refcnt;
+    $self->_weak_update_refcnt;
 
 #    $d->Seen($self->{_dumper_seen}) if $self->{_dumper_seen};
     my $dump = $d->Dump;
@@ -209,94 +258,6 @@ sub datadump {
 
     return $dump;
 }
-
-
-##### somewhat broken / unused...
-#####
-##
-##
-
-sub objleak_check {
-    my ($self, $when, @ignore) = @_;
-
-    $_ = %_ = @_ = (); # just in case...  no evidence yet that it had been a problem
-
-#    { # Prod the PEs' contents
-#	my %seen = Devel::Leak::Object::get_seen();
-#	foreach my $pe (@{ $seen{'GT::Physical::Entity'} }) {
-#	    for my $i (0 .. 100) {
-#		PRJ::GTx->singleton->getStatus(-pe => $pe);
-#	    }
-##	    $pe->{_EntireEntity} = $pe->{_SubEntities} = 'ZAPPED'; # lots of stuff should go Away, but doesn't
-#	}
-#    }
-
-    # Subtract out what we had before the test
-    my %leak_before = @{ $self->{leak_before} };
-    my %leak_after = Devel::Leak::Object::get_status();
-    foreach my $k (keys %leak_after) {
-	$leak_after{$k} -= $leak_before{$k} if defined $leak_before{$k};
-	delete $leak_after{$k} if $leak_after{$k} == 0;
-    }
-
-    delete @leak_after{@ignore};
-    my $significant = $self->{leak_significant};
-    my $remain = grep { defined } values %$significant;
-
-    return 0 if 0 == $remain && 0 == scalar keys %leak_after;
-
-    my $tot = $remain;
-    my $t = $self->global_test_name;
-    my $msg = "  objleak_check($when) for $t:\n";
-
-    # nb. this lists all outstanding objects of the class, not just the ones we're interested in
-    my %seen = Devel::Leak::Object::get_seen();
-    foreach my $seen (keys %seen) {
-	for (my $i=0; $i<@{$seen{$seen}}; $i++) {
-	    weaken($seen{$seen}[$i]); # don't count the refs we're griping about
-	}
-    }
-
-    for my $class (sort keys %leak_after) {
-	$tot += $leak_after{$class};
-	$msg .= sprintf "    %-40s %d\n", $class, $leak_after{$class};
-	my $objlist = $seen{$class};
-	for (my $i=0; $i < @$objlist; $i++) {
-	    my ($type, $count) = Devel::Leak::Object::get_refinfo($$objlist[$i]);
-	    $msg .= sprintf("      %-38s %s refcnt=%d\n", $$objlist[$i], $type, $count);
-	}
-    }
-    $self->annotate($msg);
-
-
-#    if ($self->{FC_made}) {
-#	warn "\n\n";
-#	warn ">> Kept item\n";
-#	Dump($self->{FC_made});
-#	warn ">> PEs\n";
-#	Dump($seen{'GT::Physical::Entity'});
-#	warn "\n\n";
-#    }
-
-#    my $symdump = Devel::Symdump->rnew; # recursive package dump, from main
-
-    # Dump out "significant" objects, if they remain; then leaked objects
-    # Rely on Data::Dumper doing the backreference thing to make reading easier
-    $self->annotate("    Seen objects:\n"
-		    .$self->datadump
-		    ([ $significant,
-		       $seen{'GT::Physical::Entity'},
-		       \%seen,
-		     ],
-		     [qw(*SIGNIFICANT PROBLEM_REFS seen)]));
-
-    return $tot;
-}
-
-##
-##
-#####
-##### somewhat broken / unused...
 
 
 sub global_test_name { return ref($_[0])."->".$_[0]->name }

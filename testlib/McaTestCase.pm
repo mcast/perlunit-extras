@@ -8,7 +8,7 @@ use base 'Test::Unit::TestCase';
 
 use Data::Dumper;
 use B 'svref_2object';
-use Scalar::Util 'weaken';
+use Scalar::Util qw(weaken isweak);
 
 =head1 NAME
 
@@ -74,7 +74,7 @@ sub set_up {
     warn "Test $t: info already defined?!\n" if defined $test_times{$t};
     $test_times{$t}->[0] = time2();
 
-    $self->DLO_reset if $self->DLO_present;
+    $self->DLO_reset(1) if $self->DLO_present;
 }
 
 sub tear_down {
@@ -85,6 +85,7 @@ sub tear_down {
     my $leaked = ($self->{DLO_before}
 		  ? $self->DLO_check
 		  : 0);
+    $self->DLO_reset(0); # drop the lists - nobody needs them, they're untidy on the output
 
     # Display data structures from testcase, if we fail
     if ($self->{annotate} && scalar keys %{ $self->{annotate} }) {
@@ -102,66 +103,292 @@ sub tear_down {
 sub DLO_present { Devel::Leak::Object->can('get_seen') }
 
 sub DLO_reset {
-    my $self = shift;
-    $self->{DLO_before} = Devel::Leak::Object::get_seen();
+    my ($self, $gather) = @_;
+    delete $self->{DLO_before};
     delete $self->{leak_significant};
+    $self->{DLO_before} = Devel::Leak::Object::get_seen() if $gather;
 }
 
 sub DLO_ignore_class {
     return ();
 }
 
-sub DLO_leak_annotate { 0 } # override to 1 to dump the laggards
+
+=head2 DLO_leak_annotate()
+
+Returns a boolean.  Override to 1 to dump the laggards.
+
+=cut
+
+sub DLO_leak_annotate { 0 }
+
+=head2 DLO_GV_ignorecheck($obj)
+
+Returns list of refs which should be excluded from the graph.  Is
+passed the ref currently about to be added.
+
+Method ignores parts of the DLO accounting, members of
+C<DLO_GV_nofollow_class>
+XXX: and some hardwired stuff for GT:PE's.
+
+=cut
+
+sub DLO_GV_ignorecheck {
+    my ($self, $obj) = @_;
+
+    return $obj if grep { UNIVERSAL::isa($obj, $_) } $self->DLO_GV_nofollow_class;
+
+    if (UNIVERSAL::isa($obj, __PACKAGE__)) {
+	return ($obj->{DLO_before}, $obj->{weaklist});
+    }
+    if (UNIVERSAL::isa($obj, 'Class::Abstract::Container::Bean')) {
+	return ($obj->{_KeyFunc})
+    }
+
+    return ();
+}
+
+sub _DLO_GV_seeig {
+    my ($self, $obj, $seen_ignore) = @_;
+    foreach my $ig ($self->DLO_GV_ignorecheck($obj)) {
+	next unless ref($ig);
+	$seen_ignore->{ (Devel::Leak::Object::obj_info($ig))[2] } = 1;
+    }
+}
+
+
+=head2 DLO_GV_nofollow_class()
+
+Returns a list of classes whose instances (including subclasses)
+should be ignored by the default C<DLO_GV_ignorecheck>.
+
+=cut
+
+sub DLO_GV_nofollow_class {qw{
+ Test::Unit::Listener B::Deparse
+ DBI::dr DBI::db DBI::st DBI::var Errno
+ Class::Property SqlEngine2
+ }}
+
 
 sub DLO_check {
     my $self = shift;
     $_ = %_ = @_ = (); # just in case...  no evidence yet that it had been a problem
 
+    # Subtract 'before' objects from 'after' ones, build data structure
     my $before = $self->{DLO_before};
     my $after = Devel::Leak::Object::get_seen();
-    my %after; # key = address, value = [ before-index, after-index, after_class, after_refcnt ]
+    my %after; # key = address, value = [ before-index, after-index, after_class, after_refcnt, reftype ]
     for my $outer (0, 1) {
 	my $list = ($before, $after)[$outer];
 	for (my $i=0; $i<@$list; $i++) {
+	    next unless defined $list->[$i];
+	    # The 'before' list could have holes in it from where
+	    # objects went Away during our run  XXX: could track these by keeping strong refs
+
 	    my ($class,$type,$addr,$refcnt) = Devel::Leak::Object::obj_info($list->[$i]);
 	    my $place = $after{$addr} ||= [];
 	    $place->[$outer] = $i;
 	    if ($outer) {
 		$place->[2] = $class;
 		$place->[3] = $refcnt;
+		$place->[4] = $type;
 	    }
 	}
     }
 
-    my %ignore_class;
-    @ignore_class{($self->DLO_ignore_class)} = ();
-    my (@gone, @leak);
+    my %ignore_class = map {($_ => 1)} $self->DLO_ignore_class;
+    my (@leak, @persist);
     foreach my $addr (keys %after) {
-	my ($bef, $aft, $class, $refcnt) = @{ $after{$addr} };
+	my ($bef, $aft, $class, $refcnt, $reftype) = @{ $after{$addr} };
 	# Could detect class change if we wanted to...  would need extra info
-	next if defined $bef && defined $aft;
-	next if exists $ignore_class{$class};
+#	next if $ignore_class{$class};
 	if (defined $bef) {
-	    push @gone, $addr;
+	    push @persist, $addr;
 	} else {
 	    push @leak, $addr;
 	}
     }
 
-    $self->annotate("Objects went away after DLO_reset: @gone\n") if @gone;
+#    $self->annotate("Objects persisting from before DLO_reset: @persist\n") if @persist;
+# doesn't tell us much
     return 0 if !@leak;
 
+
+##########
+#
+# Graphviz refcount dumper
+
+    my %seen; # key = addr, value = [ total-refcnt, name, type, leakstate, {edgeset}, colour ]
+    # type is ARRAY etc. or classname
+    # leakstate in (notblessed, leak, sigleak, persist, darkmatter); name often undef
+    # darkmatter: a blessed or unknown object which was not detected as leaked or persisting
+    # edgeset: key = index, value = [ addr, isweak ]
+    my @unseen; # objects pending a seeing
+    my %refs_found; # key = addr, value = found-refcnt
+    my %seen_ignore; # key = addr, value = true if we ignore the addr
+    my $see = sub {
+	my ($obj, $addr, $refcnt, $name, $class, $reftype, $leakstate, $clr) = @_;
+	$self->_DLO_GV_seeig($obj, \%seen_ignore);
+	return if $seen_ignore{$addr} || $seen{$addr};
+	die "\$see called on undef object" unless defined $obj;
+	$class = "" if !defined $class;
+	my %edgeset;
+	$seen{$addr} = [ $refcnt, $name, $class || $reftype, $leakstate, \%edgeset, $clr || 'black' ];
+	# collect refs inside $obj
+	my %scan;
+	if ($reftype eq 'SCALAR') {
+	    $scan{""} = [isweak($$obj), $$obj] if ref($$obj);
+	} elsif ($reftype eq 'ARRAY') {
+	    for (my $i=0; $i<@$obj; $i++) {
+		next unless ref($obj->[$i]);
+		$scan{$i} = [isweak($obj->[$i]), $obj->[$i]];
+	    }
+	} elsif ($reftype eq 'HASH') {
+	    foreach my $key (keys %$obj) {
+		next unless ref($obj->{$key});
+		$scan{$key} = [isweak($obj->{$key}), $obj->{$key}];
+	    }
+	} elsif ($reftype eq 'CODE' ||
+		 $reftype eq 'GLOB' ||
+		 $reftype eq 'Regexp') {
+	    # XXX: have to ignore code refs; may contain significant refs in the closure
+	} else {
+	    warn "Can't deal with reftype=$reftype class=$class, will ignore\n";
+	}
+	# make joins, collect unseen for later
+	while (my ($k, $v) = each %scan) {
+	    my ($isweak, $to) = @$v;
+	    my (undef, undef, $to_addr, undef) = Devel::Leak::Object::obj_info($to);
+	    $self->_DLO_GV_seeig($to, \%seen_ignore);
+	    next if $seen_ignore{$to_addr};
+	    $edgeset{$k} = [ $to_addr, $isweak ];
+	    $refs_found{$to_addr} ++ unless $isweak;
+	    if (!$seen{$to_addr}) { # don't re-see self
+		push @unseen, $to;
+		weaken $unseen[-1];
+	    }
+	}
+    };
+    my $getsee = sub {
+	my (undef, $name, $leakstate) = @_;
+	# $obj is $_[0], but avoid making another ref to it
+	return if !defined $_[0];
+	my ($class, $reftype, $addr, $refcnt) = Devel::Leak::Object::obj_info($_[0]);
+	$leakstate ||= ($class ? 'darkmatter' : 'notblessed');
+	$see->($_[0], $addr, $refcnt, $name, $class, $reftype, $leakstate);
+    };
+    # Prime with things we know about
+    $getsee->($self->{annotate}, 'annotate');
+    $getsee->($self, 'TESTCASE', 'persist');
+    for (my $i=0; $i<@leak; $i++) {
+	my $addr = $leak[$i];
+	my ($bef, $aft, $class, $refcnt, $reftype) = @{ $after{$addr} };
+	my $obj = $after->[$aft];
+	$see->($obj, $addr, $refcnt, undef, $class, $reftype, 'leak');
+    }
+    for (my $i=0; $i<@persist; $i++) {
+	my $addr = $persist[$i];
+	my ($bef, $aft, $class, $refcnt, $reftype) = @{ $after{$addr} };
+	my $obj = $after->[$aft];
+	$see->($obj, $addr, $refcnt, undef, $class, $reftype, 'persist');
+    }
+    # Trundle through attached things
+    while (@unseen) {
+	$getsee->(shift @unseen);
+    }
+    # Invent darkmatter to account for missing refcnt; ignore some classes
+    foreach my $addr (keys %seen) { # enumerate _before_ we start adding more
+	my $type = $seen{$addr}->[2];
+	my ($actual, $expect) = ($refs_found{$addr} || 0, $seen{$addr}->[0]);
+	next if $expect == $actual;
+	$seen{$addr}->[5] = ($actual > $expect ? 'green' : 'red');
+	for (my $i=0; $i<($expect-$actual); $i++) {
+	    my $invis_addr = "${addr}unk$i";
+	    $see->( [], $invis_addr, 1, '??', '', 'ARRAY', 'darkmatter', 'blue');
+	    $seen{$invis_addr}->[4]->{""} = [ $addr, 0 ]; # join from darkmatter to $addr
+	}
+    }
+
+
+## dot -Tps -o /tmp/leakdump.{ps,dotty} && ggv /tmp/leakdump.ps
+    open GV, ">/tmp/leakdump.dotty" or die "Can't write dotty file: $!";
+    # XXX: Hardcoded output path
+    print GV <<HDR;
+/* leakdump: @{[ $self->global_test_name, scalar localtime ]} */
+digraph leakdump {
+  rotate = 90;
+  page = "8.26,11.68";     /* A4 landscape */
+  size = "11.15,7.73";     /* multiply up for multi-page */
+  margin = "0.25,0.25";
+  ratio = "0.70719";       /* remove to allow non-filling, or for multi-paging */
+HDR
+    # XXX: Hardcoded classname abbreviation scheme, should be configurable
+    my %classmap = ('PRJ::FoosPE::Expand' => 'wc',
+		    'PRJ::FoosPE::Foo' => 'ms',       'PRJ::FoosPE::BoxedFoo' => 'pm',
+		    'PRJ::FoosPE::GroupGroup' => 'lg', 'PRJ::FoosPE::JoinPair' => 'mp',
+		    'GT::Physical::Entity' => 'PE',
+		    'GT::Physical::Entity::Contents' => 'PE:C',
+		    'GT::Physical::Entity::Contents::Container' => 'PE:Cc',
+		    'GT::Physical::Entity::Contents::Attribute' => 'PE:A',
+		    'GT::Physical::Entity::Contents::Info' => 'PE:I',
+		    'GT::Physical::Entity::Contents::Info::Container' => 'PE:Ic',
+		   );
+    # XXX: Hardcoded shape (and colour, elsewhere) scheme. No "key" graph generation.
+    my %shapemap = (SCALAR => 'diamond', ARRAY => 'parallelogram', HASH => 'trapezium',
+		    CODE => 'triangle', GLOB => 'triangle', Regexp => 'invtriangle',
+		    leak => 'house', sigleak => 'invhouse', persist => 'box',
+		    darkmatter => 'hexagon');
+    my @edges; # list of [ from_node, to_node, isweak, label ]
+    foreach my $addr (sort keys %seen) {
+	my ($refcnt, $name, $type, $leakstate, $edgeset, $clr) = @{ $seen{$addr} };
+	my $shape = $shapemap{$leakstate} || $shapemap{$type};
+	warn "No shape for leakstate=$leakstate, type=$type\n" unless defined $shape;
+	my @lbl = ($leakstate eq 'notblessed' ? "" : $classmap{$type} || $type);
+	# push @lbl, $addr;
+	push @lbl, $name if $name;
+	@lbl = ('??') if $name && $name eq '??'; # an unknown
+	my $lbl = join "\\n", @lbl;
+	(my $node = $addr) =~ s/^0x/x/;
+	print GV qq{$node \[ label="$lbl", shape=$shape, color=$clr ]; /* refcnt=$refcnt */\n};
+	while (my ($k, $v) = each %$edgeset) {
+	    my ($to_addr, $isweak) = @$v;
+	    next unless exists $seen{$to_addr}; # skip edges to ignored nodes
+	    (my $to_node = $to_addr) =~ s/^0x/x/;
+	    push @edges, [ $node, $to_node, $isweak, $k ];
+	}
+    }
+    foreach my $e (@edges) {
+	my ($from, $to, $isweak, $edge) = @$e;
+	my $style = $isweak ? 'dotted' : 'solid';
+	my @label = $edge;
+	while (length($label[-1]) > 25) {
+	    splice @label, -1, 0, substr($label[-1], 0, 20, "");
+	}
+	my $label = join "\\n", @label;
+	print GV qq{$from -> $to \[ style=$style, label="$label" ];\n};
+    }
+    print GV "}\n";
+    close GV;
+
+# Graphviz refcount dumper
+#
+##########
+
+    # Generate annotation text from leak addresses
+    my @leak_descr;
     for (my $i=0; $i<@leak; $i++) {
 	# Reformat the @leak list with detail
 	my $addr = $leak[$i];
-	my ($bef, $aft, $class, $refcnt) = @{ $after{$addr} };
+	my ($bef, $aft, $class, $refcnt, $reftype) = @{ $after{$addr} };
+	next if $ignore_class{$class};
 	my $obj = $after->[$aft];
 	$self->dumpnote_weak("DLO_leak_$addr" => $obj) if $self->DLO_leak_annotate;
-	$leak[$i] = sprintf("  %-16s %s refcnt=%d\n", $class, $addr, $refcnt);
+	push @leak_descr, sprintf("  %-16s %s refcnt=%d\n", $class, $addr, $refcnt);
     }
-    $self->annotate(join "", " Leaks detected in DLO_check\n", sort @leak);
+    $self->annotate(join "", " Leaks detected in DLO_check\n", sort @leak_descr);
 
-    return scalar @leak;
+    return scalar @leak_descr;
 }
 
 sub _weak_update_refcnt {

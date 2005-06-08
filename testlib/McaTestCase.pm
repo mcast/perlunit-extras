@@ -106,6 +106,7 @@ sub DLO_reset {
     my ($self, $gather) = @_;
     delete $self->{DLO_before};
     delete $self->{leak_significant};
+    delete $self->{weaklist};
     $self->{DLO_before} = Devel::Leak::Object::get_seen() if $gather;
 }
 
@@ -139,7 +140,7 @@ sub DLO_GV_ignorecheck {
     return $obj if grep { UNIVERSAL::isa($obj, $_) } $self->DLO_GV_nofollow_class;
 
     if (UNIVERSAL::isa($obj, __PACKAGE__)) {
-	return ($obj->{DLO_before}, $obj->{weaklist});
+	return ($obj->{DLO_before});
     }
     if (UNIVERSAL::isa($obj, 'Class::Abstract::Container::Bean')) {
 	return ($obj->{_KeyFunc})
@@ -393,9 +394,9 @@ HDR
 
 sub _weak_update_refcnt {
     my $self = shift;
-    my $h = $self->{weaklist};
-    return unless $h;
-    while (my ($name, $list) = each %$h) {
+    my $L = $self->{weaklist};
+    return unless $L;
+    foreach my $list (@$L) {
 	if (ref($list->[1])) {
 	    my $bsv = svref_2object($list->[1]);
 	    $list->[0] = ref($bsv)." refcnt=".$bsv->REFCNT;
@@ -418,11 +419,11 @@ sub objleak_significant {
     my ($self, @pairs) = @_;
     my $h = $self->{annotate} ||= {};
     my $leak = $self->{leak_significant} ||= {};
-    my $weaks = $self->{weaklist} ||= {};
+    my $weaks = $self->{weaklist} ||= [];
     while (my ($name, $value) = splice @pairs, 0, 2) {
 	$self->_dump_order_add($h, $name) unless exists $h->{$name};
 	my $list = $h->{$name} = [ undef, $value ];
-	$weaks->{$list} = $list;
+	push @$weaks, $list;
 	$leak->{$list} = $list;
 	weaken $list->[1];
     }
@@ -432,11 +433,11 @@ sub objleak_significant {
 sub dumpnote_weak {
     my ($self, @pairs) = @_;
     my $h = $self->{annotate} ||= {};
-    my $weaks = $self->{weaklist} ||= {};
+    my $weaks = $self->{weaklist} ||= [];
     while (my ($name, $value) = splice @pairs, 0, 2) {
 	$self->_dump_order_add($h, $name) unless exists $h->{$name};
 	my $list = $h->{$name} = [ undef, $value ];
-	$weaks->{$list} = $list;
+	push @$weaks, $list;
 	weaken $list->[1];
     }
     0;

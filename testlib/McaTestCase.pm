@@ -1,7 +1,10 @@
-#! /usr/local/bin/perl -wc
+
+# Interleaved test methods go in this package, you can add it to your
+# suite or not.
+package McaTestCaseTest;
+our @ISA = qw(McaTestCase);
 
 package McaTestCase;
-# $Id$
 
 use strict;
 use base 'Test::Unit::TestCase';
@@ -9,6 +12,7 @@ use base 'Test::Unit::TestCase';
 use Data::Dumper;
 use B 'svref_2object';
 use Scalar::Util qw(weaken isweak);
+
 
 =head1 NAME
 
@@ -28,9 +32,6 @@ This is a mixed bag of stuff collected together to help write test
 cases.  I use it as a base class, it inherits in turn from
 L<Test::Unit::TestCase> .
 
-It includes its own testsuite in each of yours.  This is false
-laziness on my part, the testsuite should be elsewhere.
-
 =head2 Dump debug data when needed
 
 During C<tear_down>, will annotate the test with the L<Data::Dumper>
@@ -46,7 +47,15 @@ defined as taking more than 3x the average wall-clock time of all the
 tests.  It's designed to keep quiet unless there are hogs to report
 on.
 
+=head2 Use Devel::Leak::Object, if loaded
+
+Lots of stuff here.
+
 =cut
+
+# $Id$
+
+#----------------------------------------------------------------------------
 
 
 my %test_times; # key="testclass->test_name", value = [ starttime, endtime ]
@@ -111,7 +120,7 @@ sub DLO_reset {
 }
 
 sub DLO_ignore_class {
-    return ();
+    return qw(B::Deparse);
 }
 
 
@@ -171,6 +180,23 @@ sub DLO_GV_nofollow_class {qw{
  Class::Property SqlEngine2
  }}
 
+
+=head2 DLO_GV_getname($obj)
+
+Called once per object, if the object hasn't already been given some
+sort of name.  The default is to return C<undef> - an anonymous
+object.
+
+=cut
+
+sub DLO_GV_getname {
+    my ($self, $obj) = @_;
+    if (grep { UNIVERSAL::isa($obj, $_) }
+	qw(GT::Physical::Entity GT::Physical::Entity::Contents)) {
+	return $obj->getId;
+    }
+    return undef;
+}
 
 sub DLO_check {
     my $self = shift;
@@ -234,6 +260,7 @@ sub DLO_check {
 	return if $seen_ignore{$addr} || $seen{$addr};
 	die "\$see called on undef object" unless defined $obj;
 	$class = "" if !defined $class;
+	$name = $self->DLO_GV_getname($obj) if !defined $name;
 	my %edgeset;
 	$seen{$addr} = [ $refcnt, $name, $class || $reftype, $leakstate, \%edgeset, $clr || 'black' ];
 	# collect refs inside $obj
@@ -312,8 +339,9 @@ sub DLO_check {
     }
 
 
-## dot -Tps -o /tmp/leakdump.{ps,dotty} && ggv /tmp/leakdump.ps
-    open GV, ">/tmp/leakdump.dotty" or die "Can't write dotty file: $!";
+## dot -Tps -o $ENV{HOME}/tmp/leakdump.{ps,dotty} && ggv /tmp/leakdump.ps
+    my $dotFn = "$ENV{HOME}/tmp/leakdump.dotty";
+    open GV, ">$dotFn" or die "Can't write dotty file $dotFn: $!";
     # XXX: Hardcoded output path
     print GV <<HDR;
 /* leakdump: @{[ $self->global_test_name, scalar localtime ]} */
@@ -363,8 +391,8 @@ HDR
 	my ($from, $to, $isweak, $edge) = @$e;
 	my $style = $isweak ? 'dotted' : 'solid';
 	my @label = $edge;
-	while (length($label[-1]) > 25) {
-	    splice @label, -1, 0, substr($label[-1], 0, 20, "");
+	while (length($label[-1]) > 20) {
+	    splice @label, -1, 0, substr($label[-1], 0, 15, "");
 	}
 	my $label = join "\\n", @label;
 	print GV qq{$from -> $to \[ style=$style, label="$label" ];\n};
@@ -545,9 +573,9 @@ C<$database_id> must be a plain non-negative integer.
 
 =head2 Self-tests
 
-Includes tests of its new C<assert_*> methods, these will piggyback on
-each of your test classes.  If this turns out to be a major time
-waster then I'll move them.
+Includes tests of its new C<assert_*> methods, inline in the file but
+in a separate package so they don't piggyback on C<McaTestCase>
+subclasses.
 
 =cut
 
@@ -586,7 +614,7 @@ sub assert_dies {
 # Self-tests for this base class, might as well piggyback unless/until
 # that wastes too much time
 
-sub test_baseselftest_assert_dies {
+sub McaTestCaseTest::test_assert_dies {
     my $self = shift;
 
     # Run our assertion so it should pass, check it ran
@@ -681,7 +709,7 @@ sub assert_samerefs {
     }
 }
 
-sub test_baseselftest_assert_samerefs {
+sub McaTestCaseTest::test_assert_samerefs {
     my $self = shift;
     my @o = ( 34, [ 78 ], { foo => 'bar' } );
 
@@ -718,7 +746,7 @@ sub assert_is_idnum {
     $self->assert_matches(qr/^\d+$/, $id, "$descr: '$id' contains non-numeric");
 }
 
-sub test_baseselftest_assert_is_idnum {
+sub McaTestCaseTest::test_assert_is_idnum {
     my $self = shift;
 
     foreach my $id ("0", "634535345345", 5 .. 10) {
@@ -751,7 +779,7 @@ sub assert_isa {
     }
 }
 
-sub test_assert_isa {
+sub McaTestCaseTest::test_assert_isa {
     my $self = shift;
     $self->assert_raises('Test::Unit::Failure', sub {
 			     $self->assert_isa(undef, "Foo");
@@ -799,6 +827,6 @@ BEGIN {
 
 =head1 AUTHOR
 
-Matthew Astley E<lt>mca@sanger.ac.ukE<gt> 2004-08ish
+Matthew Astley E<lt>mca@sanger.ac.ukE<gt> 2004-08ish, 2005-06 (D:L:O stuff)
 
 =cut

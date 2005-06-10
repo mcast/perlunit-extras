@@ -51,6 +51,12 @@ on.
 
 Lots of stuff here.
 
+=head2 Checking the libs were loaded from consistent places
+
+This needs to be configured by the test case, else it does nothing.
+
+If inconsistencies are detected, the C<set_up> will fail.
+
 =cut
 
 # $Id$
@@ -84,6 +90,7 @@ sub set_up {
     $test_times{$t}->[0] = time2();
 
     $self->DLO_reset(1) if $self->DLO_present;
+    $self->libscheck_do();
 }
 
 sub tear_down {
@@ -532,7 +539,7 @@ END {
 	      sprintf("%-60s %3.1fs %3d%%\n", $t, $elapsed, 100 * $elapsed / $tot_time)
 		if $elapsed > $time_lim;
 	} else {
-	    push @timings, "$t\tdata missing\n";
+	    push @timings, "$t\tdata missing (tear_down breakage || set_up died)\n";
 	}
     }
     print( "-" x 70,
@@ -540,6 +547,94 @@ END {
 	   sprintf("%3.1fs)\n", $time_lim),
 	   @timings)
       if @timings;
+}
+
+sub libscheck_do {
+    my $self = shift;
+    my (@prob, @info);
+    foreach my $group (sort $self->libscheck_get) {
+	my %source;
+	my $common;    # e.g.  /home/me/projdir/
+	my %uncommon;  # e.g.  lib/ testlib/ [keys only, no values]
+	foreach my $incmod (grep m{^$group(/|\.pm$)}, keys %INC) {
+	    my $src = $INC{$incmod};
+	    my $len = length($incmod);
+
+	    # This allows two packages in one file, provided the extra
+	    # package doesn't explicitly add itself to %INC .
+
+	    # It doesn't allow packages declaring themselves to have
+	    # been included from a file which isn't named
+	    # appropriately.
+
+	    if (substr($src, -$len, $len) ne $incmod) {
+		push @prob, "Can't match sourcefile $src to module \$INC{$incmod}";
+		$source{$incmod} = $src;
+		next;
+	    }
+	    substr($src, -$len, $len) = "";
+	    $source{$incmod} = $src;
+
+	    # Detect common path prefixes in the group
+	    if (defined $common) {
+		my $tmp = $common;
+		while (substr($src, 0, length($tmp)) ne $tmp) {
+		    # prefixes differ, shrink the prefix by one char
+		    substr($tmp, -1, 1) = "";
+		}
+		my $lost_common = substr($common, length($tmp));
+		if ($lost_common ne "") {
+		    # Update existing uncommon
+		    my @uncommon = keys %uncommon;
+		    %uncommon = ();
+		    $uncommon{$lost_common.$_} = undef foreach @uncommon;
+		}
+		$common = $tmp;
+	    } else {
+		$common = $src;
+	    }
+	    $uncommon{substr($src, length($common))} = undef;
+	}
+	push @info, (" For package group $group\n".
+		     join "", (map {sprintf("  %-40s %s\n", $_, $source{$_})}
+			       sort keys %source));
+	my @uncommon = keys %uncommon;
+	push @info, "  > common prefix = $common\n  > uncommon suffixes = (@uncommon)\n\n";
+	# Allow certain uncommon path elements
+	delete @uncommon{qw{ lib/ testlib/ }};
+	delete $uncommon{""};
+	# Complain if anything remains
+	push @prob, (join "\n  ",
+		     "Cannot reconcile these paths within package group $group",
+		     # original paths containing modules
+		     sort map {$common.$_} @uncommon)
+	  if scalar keys %uncommon;
+    }
+
+    # warn "\n\n@info\n";
+    if (@prob) {
+	my $msg = join "\n", @prob;
+	$self->fail("libscheck_do failure as above")
+	  unless $self->_libscheck_newfailp($msg);
+	$self->annotate(join "", "libscheck_do info:\n", @info);
+	$self->fail($msg);
+    }
+}
+
+{
+    # Idempotent setup via class method
+    # Could be made specific to the calling test class, but isn't
+    my %pkgroots; # key = regexp fragment for package group; no value
+    sub libscheck_group { shift; @pkgroots{join "|", @_} = () } # XXX: regexp escape the class prefixes?
+    sub libscheck_get { return keys %pkgroots }
+    # Cut out duplicate long messages
+    my %fails;
+    sub _libscheck_newfailp {
+	my ($self, $msg) = @_;
+	my $new = !exists $fails{$msg};
+	$fails{$msg} = 1;
+	return $new;
+    }
 }
 
 

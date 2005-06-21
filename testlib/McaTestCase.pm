@@ -276,7 +276,8 @@ sub DLO_check {
 	$seen{$addr} = [ $refcnt, $name, $class || $reftype, $leakstate, \%edgeset, $clr || 'black' ];
 	# collect refs inside $obj
 	my %scan;
-	if ($reftype eq 'SCALAR') {
+	if ($reftype eq 'REF' || # e.g. \\$foo
+	    $reftype eq 'SCALAR') {
 	    $scan{""} = [isweak($$obj), $$obj] if ref($$obj);
 	} elsif ($reftype eq 'ARRAY') {
 	    for (my $i=0; $i<@$obj; $i++) {
@@ -360,7 +361,7 @@ sub DLO_check {
     }
 
 
-## dot -Tps -o $ENV{HOME}/tmp/leakdump.{ps,dotty} && ggv /tmp/leakdump.ps
+## dot -Tps -o ~/tmp/leakdump.{ps,dotty} && gv ~/tmp/leakdump.ps
     my $dotFn = "$ENV{HOME}/tmp/leakdump.dotty";
     open GV, ">$dotFn" or die "Can't write dotty file $dotFn: $!";
     # XXX: Hardcoded output path

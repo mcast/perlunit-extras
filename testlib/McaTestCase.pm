@@ -185,6 +185,8 @@ sub DLO_GV_nofollow_class {qw{
  Test::Unit::Listener B::Deparse
  DBI::dr DBI::db DBI::st DBI::var Errno
  Class::Property SqlEngine2
+
+ XEvent PRJ::Tk::Font Tk::Font Tk::Callback Tk::Ev
  }}
 
 
@@ -201,6 +203,8 @@ sub DLO_GV_getname {
     if (grep { UNIVERSAL::isa($obj, $_) }
 	qw(GT::Physical::Entity GT::Physical::Entity::Contents)) {
 	return $obj->getId;
+    } elsif (UNIVERSAL::isa($obj, 'PRJ::Dataset')) {
+	return $obj->name;
     }
     return undef;
 }
@@ -289,7 +293,7 @@ sub DLO_check {
 		 $reftype eq 'Regexp') {
 	    # XXX: have to ignore code refs; may contain significant refs in the closure
 	} else {
-	    warn "Can't deal with reftype=$reftype class=$class, will ignore\n";
+	    warn "Can't deal with item=$obj reftype=$reftype class=$class, will ignore\n";
 	}
 	# make joins, collect unseen for later
 	while (my ($k, $v) = each %scan) {
@@ -338,10 +342,20 @@ sub DLO_check {
 	my ($actual, $expect) = ($refs_found{$addr} || 0, $seen{$addr}->[0]);
 	next if $expect == $actual;
 	$seen{$addr}->[5] = ($actual > $expect ? 'green' : 'red');
-	for (my $i=0; $i<($expect-$actual); $i++) {
-	    my $invis_addr = "${addr}unk$i";
-	    $see->( [], $invis_addr, 1, '??', '', 'ARRAY', 'darkmatter', 'blue');
-	    $seen{$invis_addr}->[4]->{""} = [ $addr, 0 ]; # join from darkmatter to $addr
+
+	my $invis_addr = "${addr}unk";
+	my $outstanding = $expect-$actual;
+	if (1) {
+	    # one object only
+	    $see->( [], $invis_addr, 1, "($outstanding)", "??", 'ARRAY', 'darkmatter', 'blue');
+	    $seen{$invis_addr}->[4]->{""} = [ $addr, 0 ];
+	} else {
+	    # an object per lost ref
+	    for (my $i=0; $i<$outstanding; $i++) {
+		my $invis_addr = "${addr}unk$i";
+		$see->( [], $invis_addr, 1, '??', '', 'ARRAY', 'darkmatter', 'blue');
+		$seen{$invis_addr}->[4]->{""} = [ $addr, 0 ]; # join from darkmatter to $addr
+	    }
 	}
     }
 
@@ -350,14 +364,18 @@ sub DLO_check {
     my $dotFn = "$ENV{HOME}/tmp/leakdump.dotty";
     open GV, ">$dotFn" or die "Can't write dotty file $dotFn: $!";
     # XXX: Hardcoded output path
+    my ($pgX, $pgY) = (11.68, 8.26);
+    my ($gX, $gY) = ($pgX - 0.52, $pgY - 0.52);
+#    $gX *= 4;
+    my $ratio = $gY / $gX;
     print GV <<HDR;
 /* leakdump: @{[ $self->global_test_name, scalar localtime ]} */
 digraph leakdump {
   rotate = 90;
-  page = "8.26,11.68";     /* A4 landscape */
-  size = "11.15,7.73";     /* multiply up for multi-page */
+  page = "$pgY,$pgX";     /* A4 landscape */
+  size = "$gX,$gY";     /* multiply up for multi-page */
   margin = "0.25,0.25";
-  ratio = "0.70719";       /* remove to allow non-filling, or for multi-paging */
+  ratio = "$ratio";   /* remove to allow non-filling, or for multi-paging */
 HDR
     # XXX: Hardcoded classname abbreviation scheme, should be configurable
     my %classmap = ('PRJ::FoosPE::Expand' => 'wc',
@@ -373,6 +391,7 @@ HDR
     # XXX: Hardcoded shape (and colour, elsewhere) scheme. No "key" graph generation.
     my %shapemap = (SCALAR => 'diamond', ARRAY => 'parallelogram', HASH => 'trapezium',
 		    CODE => 'triangle', GLOB => 'triangle', Regexp => 'invtriangle',
+		    REF => 'ellipse',
 		    leak => 'house', sigleak => 'invhouse', persist => 'box',
 		    darkmatter => 'hexagon');
     my @edges; # list of [ from_node, to_node, isweak, label ]
@@ -383,7 +402,6 @@ HDR
 	my @lbl = ($leakstate eq 'notblessed' ? "" : $classmap{$type} || $type);
 	# push @lbl, $addr;
 	push @lbl, $name if $name;
-	@lbl = ('??') if $name && $name eq '??'; # an unknown
 	my $lbl = join "\\n", @lbl;
 	(my $node = $addr) =~ s/^0x/x/;
 	print GV qq{$node \[ label="$lbl", shape=$shape, color=$clr ]; /* refcnt=$refcnt */\n};

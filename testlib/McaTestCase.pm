@@ -200,7 +200,9 @@ object.
 
 sub DLO_GV_getname {
     my ($self, $obj) = @_;
-    if (grep { UNIVERSAL::isa($obj, $_) }
+    if (ref($obj) eq 'GLOB') {
+	return *$obj; # name of typeglob (if it has one?)
+    } elsif (grep { UNIVERSAL::isa($obj, $_) }
 	qw(GT::Physical::Entity GT::Physical::Entity::Contents)) {
 	return $obj->getId;
     } elsif (UNIVERSAL::isa($obj, 'PRJ::Dataset')) {
@@ -286,11 +288,23 @@ sub DLO_check {
 	    }
 	} elsif ($reftype eq 'HASH') {
 	    foreach my $key (keys %$obj) {
-		next unless ref($obj->{$key});
-		$scan{$key} = [isweak($obj->{$key}), $obj->{$key}];
+		if (ref($obj->{$key})) {
+		    $scan{$key} = [isweak($obj->{$key}), $obj->{$key}];
+		} elsif (ref(\$obj->{$key}) eq 'GLOB') {
+		    # special case for when the object is a GLOB (not a ref to a GLOB)
+		    # seen in the symbol table, but unlikely elsewhere - will be ignored
+		    # the rest of the code can't deal with a non-ref, so take a ref here
+		    $scan{$key} = [0, \$obj->{$key}];
+		    # XXX: GLOB scanning pulls out a huge tangle of junk
+		    # XXX: this seems to show a refcount too small by 1...?
+		}
+	    }
+	} elsif ($reftype eq 'GLOB') {
+	    foreach my $key (qw(SCALAR ARRAY HASH CODE IO GLOB)) {
+		next unless defined *$obj{$key};
+		$scan{$key} = [isweak(*$obj{$key}), *$obj{$key}];
 	    }
 	} elsif ($reftype eq 'CODE' ||
-		 $reftype eq 'GLOB' ||
 		 $reftype eq 'Regexp') {
 	    # XXX: have to ignore code refs; may contain significant refs in the closure
 	} else {
@@ -320,7 +334,15 @@ sub DLO_check {
     };
     # Prime with things we know about
     $getsee->($self->{annotate}, 'annotate');
-    $getsee->($self, 'TESTCASE', 'persist');
+
+    { # XXX:DEBUG this doesn't belong here
+	no strict 'refs';
+#	$getsee->(\*{'PRJ::BioTables::'});
+	$getsee->(\*{'PRJ::BioTables::singleton'});
+	$getsee->(\*{'PRJ::BioTables::__genotypes__idlocus_namegeno'});
+    }
+
+    $getsee->($self, 'THIS_TEST', 'persist');
     for (my $i=0; $i<@leak; $i++) {
 	my $addr = $leak[$i];
 	my ($bef, $aft, $class, $refcnt, $reftype) = @{ $after{$addr} };
@@ -333,6 +355,7 @@ sub DLO_check {
 	my $obj = $after->[$aft];
 	$see->($obj, $addr, $refcnt, undef, $class, $reftype, 'persist');
     }
+    # XXX: Need to trundle the symbol table, else CODE refs stored with "$h->{foo} = \&__foo_sub" have a lost count (this turned out to be spot on, and a symbol table walk plus deparse(?) extraction of trapped lexical would have found it)
     # Trundle through attached things
     while (@unseen) {
 	$getsee->(shift @unseen);
@@ -362,7 +385,8 @@ sub DLO_check {
 
 
 ## dot -Tps -o ~/tmp/leakdump.{ps,dotty} && gv ~/tmp/leakdump.ps
-    my $dotFn = "$ENV{HOME}/tmp/leakdump.dotty";
+    my $tst = $self->name;
+    my $dotFn = "$ENV{HOME}/tmp/leakdump.$tst.dotty";
     open GV, ">$dotFn" or die "Can't write dotty file $dotFn: $!";
     # XXX: Hardcoded output path
     my ($pgX, $pgY) = (11.68, 8.26);
@@ -391,7 +415,7 @@ HDR
 		   );
     # XXX: Hardcoded shape (and colour, elsewhere) scheme. No "key" graph generation.
     my %shapemap = (SCALAR => 'diamond', ARRAY => 'parallelogram', HASH => 'trapezium',
-		    CODE => 'triangle', GLOB => 'triangle', Regexp => 'invtriangle',
+		    CODE => 'triangle', GLOB => 'ellipse', Regexp => 'invtriangle',
 		    REF => 'ellipse',
 		    leak => 'house', sigleak => 'invhouse', persist => 'box',
 		    darkmatter => 'hexagon');

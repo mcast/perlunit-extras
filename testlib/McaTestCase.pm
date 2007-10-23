@@ -4,6 +4,7 @@
 package McaTestCaseTest;
 our @ISA = qw(McaTestCase);
 
+
 package McaTestCase;
 
 use strict;
@@ -12,6 +13,9 @@ use base 'Test::Unit::TestCase';
 use Data::Dumper;
 use B 'svref_2object';
 use Scalar::Util qw(weaken isweak);
+
+use Exporter 'import'; # have Exporter's import() method directly
+our @EXPORT_OK = qw(wantarray_type);  # exportable utility
 
 
 =head1 NAME
@@ -687,11 +691,19 @@ These can be used in the usual way.
 
 =over 4
 
-=item C<assert_dies( qr/message regex/, @coderefs, $descr])>
+=item C<assert_dies( qr/message regex/, @coderefs, $descr)>
 
-Run each piece of code.  Assert that each one dies, and that the
-resulting error message matches the regex.  Extra description
-C<$descr> is optional.
+Run each piece of code (in void context).  Assert that each one dies,
+and that the resulting error message matches the regex.
+
+Extra description C<$descr> is optional.
+
+=item C<assert_warns( qr/message regex/, @coderefs, $descr)>
+
+Run each piece of code (in void context).  Assert that each one
+generates a warning, and that the message matches the regex.
+
+Extra description C<$descr> is optional.
 
 =item C<assert_samerefs([$expect_object1, $expect_object2], [$actual_object1, $actual_object2 ], $descr)>
 
@@ -707,6 +719,11 @@ failure messages.
 
 C<$database_id> must be a plain non-negative integer.
 
+=item C<assert_isa($obj, @isa)>
+
+Assert that C<$obj> is an object and is in B<all> of the classes
+C<@isa>.
+
 =back
 
 =head2 Self-tests
@@ -714,6 +731,9 @@ C<$database_id> must be a plain non-negative integer.
 Includes tests of its new C<assert_*> methods, inline in the file but
 in a separate package so they don't piggyback on C<McaTestCase>
 subclasses.
+
+Use them by putting C<McaTestCaseTest> in your test suite, otherwise
+they will be compiled but not run.
 
 =cut
 
@@ -748,9 +768,6 @@ sub assert_dies {
 			      "Code$which, $caller:\n  Died with '$err'\n  which didn't match $regex");
     }
 }
-
-# Self-tests for this base class, might as well piggyback unless/until
-# that wastes too much time
 
 sub McaTestCaseTest::test_assert_dies {
     my $self = shift;
@@ -823,6 +840,118 @@ sub McaTestCaseTest::test_assert_dies {
 						sub { die "unhelpful message" },
 						"vital piece of info");
 			});
+
+    $self->assert_dies(qr{wantarray check},
+		       sub {
+			   my $T = wantarray_type(wantarray);
+			   die "void context: wantarray check is ok" if $T eq 'void';
+			   $self->fail("expected void context, got $T");
+		       });
+}
+
+
+# Assert that each coderef generates one warning message matching the regex
+sub assert_warns {
+    my ($self, $regex, @coderef) = @_;
+
+    # Need to include caller in failure message, since the builtin
+    # line number reporting is no help
+    my @caller = caller();
+    my $caller = "caller at $caller[1] line $caller[2]";
+
+    if (@coderef > 1 && !ref($coderef[-1])) {
+	# Last item isn't code, take it as an extra piece of message
+	$caller .= ", ".pop(@coderef);
+    }
+
+    $self->fail("arg1 not Regexp from $caller") unless ref($regex) eq 'Regexp';
+    $self->fail("Bad args (no coderefs) from $caller") unless @coderef;
+    $self->fail("Bad args (coderefs aren't) from $caller") if grep {ref($_) ne 'CODE'} @coderef;
+
+    for (my $i=0; $i<@coderef; $i++) {
+	my @warn;
+	{
+	    local $SIG{__WARN__} = sub { push @warn, "@_" };
+	    $coderef[$i]->();
+	}
+	my $which = "";
+	$which = join "", "[", $i+1, " of ", scalar @coderef, "]" if @coderef > 1;
+	$self->fail("Code$which did not warn, $caller") unless @warn;
+	$self->fail("Code$which warned more than once, $caller\n@warn") unless 1 == @warn;
+	$self->assert_matches($regex, $warn[0],
+			      "Code$which, $caller:\n  Warned with '$warn[0]'\n  which didn't match $regex");
+    }
+}
+
+sub McaTestCaseTest::test_assert_warns {
+    my $self = shift;
+
+    my @leaked_warnings;
+    local $SIG{__WARN__} = sub {
+	push @leaked_warnings, "@_";
+	warn @_ unless $_[0] =~ /^Deliberate/;
+    };
+
+    warn "Deliberate leakage of one warning";
+
+    my $num = 0;
+    $self->assert_warns(qr{\bfoo\b},
+			sub { $num++; warn "this foo"; return qw( a b c ) },
+			sub { $num++; warn "that foo\n"; return 1 },
+			sub { $num++; warn "foo the last"; return () });
+    $self->assert_num_equals(3, $num);
+
+    $self->assert_dies(qr{don't trap die},
+		       sub {
+			   $self->assert_warns(qr{warntest}, sub { die "don't trap die" });
+		       });
+
+    $self->assert_raises("Test::Unit::Failure",
+			 sub {
+			     $self->assert_warns
+			       (qr{\bfoo\b}, sub { return "no warning" });
+			 });
+    $self->assert_raises("Test::Unit::Failure",
+			 sub {
+			     $self->assert_warns
+			       (qr{\bfoo\b}, sub { warn "unmatched warning" });
+			 });
+    $self->assert_raises("Test::Unit::Failure",
+			 sub {
+			     $self->assert_warns
+			       (qr{bar},
+				sub { warn "bar bar black sheep" },
+				sub { return "no wool" },
+				sub { die "Last code should not run" });
+			 });
+    $self->assert_raises("Test::Unit::Failure",
+			 sub {
+			     $self->assert_warns
+			       (qr{moof}, sub { warn "first is moofy";
+						warn "second also moofy but unwanted"; });
+			 });
+    $self->assert_raises("Test::Unit::Failure",
+			 sub {
+			     $self->assert_warns
+			       (qr{spong}, sub { warn "spong"; warn "second doesn't" });
+			 });
+
+# XXX: should check that the assert_warns input args are sanitised carefully; this is shared with other asserts and should be tested together or refactored
+    $self->assert_warns(qr{wantarray check},
+			sub {
+			    my $T = wantarray_type(wantarray);
+			    $self->fail("expected void context, got $T") if $T ne 'void';
+			    warn "wantarray check";
+			});
+
+    # Check the 'last arg can be text' thing works
+    $self->assert_dies(qr/vital/,
+		       sub {
+			   $self->assert_warns(qr/foo/,
+					       sub { warn "trivial message" },
+					       "vital piece of info");
+		       });
+
 }
 
 
@@ -934,6 +1063,50 @@ sub McaTestCaseTest::test_assert_isa {
     $self->assert_raises('Test::Unit::Failure', sub {
 			     $self->assert_isa($self, qw(Test::Unit::Test Gronk Test::Unit::TestCase));
 			 }, "Cope with wrong class");
+}
+
+
+=head1 EXPORTABLE UTILITY SUBROUTINES
+
+This module also provides subroutines which can be imported in the
+usual way.  This is separate from the object or class method calling
+style.
+
+=head2 wantarray_type($val)
+
+Simple tristate conversion to call as C< my $T =
+wantarray_type(wantarray) > so you can print the callers expectation
+neatly.
+
+=cut
+
+sub wantarray_type {
+    die "expected one arg (the wantarray value), got @_" unless 1 == @_;
+    my $W = shift; # the wantarray value to show
+    return ($W
+	    ? "list"
+	    : (defined $W
+	       ? "scalar"
+	       : "void"));
+}
+
+sub McaTestCaseTest::test_wantarray_type {
+    my $self = shift;
+
+    my $T;
+    my $num = 0;
+    my $code = sub { $T = wantarray_type(wantarray); $num++ };
+
+    $code->("foo");
+    $self->assert_str_equals("void", $T);
+
+    my $junk = $code->(1, 2, 3);
+    $self->assert_str_equals("scalar", $T);
+
+    my @junk = $code->();
+    $self->assert_str_equals("list", $T);
+
+    $self->assert_num_equals(3, $num);
 }
 
 

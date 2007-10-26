@@ -3,6 +3,7 @@
 # suite or not.
 package McaTestCaseTest;
 our @ISA = qw(McaTestCase);
+# require Carp; # needed for self-testing only
 
 
 package McaTestCase;
@@ -574,7 +575,9 @@ sub global_test_name { return ref($_[0])."->".$_[0]->name }
 
 END {
     my $tot_time = time2();
-    $tot_time = 0.1 if $tot_time == 0;
+#    $tot_time = 0.1 if $tot_time == 0; # prevent oddities with zero seconds
+    $tot_time = 3 if $tot_time < 5; # try to avoid warnings for the odd half-second test
+
     my $tests = (scalar keys %test_times) || 1;
     my $time_lim = $tot_time / $tests * 3;
     my @timings;
@@ -893,13 +896,16 @@ sub McaTestCaseTest::test_assert_warns {
     };
 
     warn "Deliberate leakage of one warning";
+    require Carp; # needed for self-testing only
 
     my $num = 0;
     $self->assert_warns(qr{\bfoo\b},
 			sub { $num++; warn "this foo"; return qw( a b c ) },
 			sub { $num++; warn "that foo\n"; return 1 },
+			sub { $num++; Carp::carp "foo applied via Carp module" },
+			sub { $num++; Carp::cluck "foo warning with stacktrace" },
 			sub { $num++; warn "foo the last"; return () });
-    $self->assert_num_equals(3, $num);
+    $self->assert_num_equals(5, $num);
 
     $self->assert_dies(qr{don't trap die},
 		       sub {
@@ -1063,6 +1069,24 @@ sub McaTestCaseTest::test_assert_isa {
     $self->assert_raises('Test::Unit::Failure', sub {
 			     $self->assert_isa($self, qw(Test::Unit::Test Gronk Test::Unit::TestCase));
 			 }, "Cope with wrong class");
+}
+
+
+=head2 mark_skiptest($msg)
+
+Object method for the test, intended to indicate that a test is being
+skipped.
+
+Currently Perlunit doesn't support the concept so this method just
+prints a warning and returns.  Later it may throw a "skip" exception,
+so don't assume it returns.
+
+=cut
+
+sub mark_skiptest {
+    my ($self, $msg) = @_;
+    my $name = $self->global_test_name;
+    warn "\nSkipping test $name: $msg\n ";
 }
 
 

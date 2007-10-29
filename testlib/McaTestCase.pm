@@ -9,14 +9,11 @@ our @ISA = qw(McaTestCase);
 package McaTestCase;
 
 use strict;
-use base 'Test::Unit::TestCase';
+use base qw( Test::Unit::TestCase Test::Unit::Assert::CodeBehaviour Test::Unit::Assert::DataRefs );
 
 use Data::Dumper;
 use B 'svref_2object';
 use Scalar::Util qw(weaken isweak);
-
-use Exporter 'import'; # have Exporter's import() method directly
-our @EXPORT_OK = qw(wantarray_type);  # exportable utility
 
 
 =head1 NAME
@@ -694,38 +691,9 @@ These can be used in the usual way.
 
 =over 4
 
-=item C<assert_dies( qr/message regex/, @coderefs, $descr)>
-
-Run each piece of code (in void context).  Assert that each one dies,
-and that the resulting error message matches the regex.
-
-Extra description C<$descr> is optional.
-
-=item C<assert_warns( qr/message regex/, @coderefs, $descr)>
-
-Run each piece of code (in void context).  Assert that each one
-generates a warning, and that the message matches the regex.
-
-Extra description C<$descr> is optional.
-
-=item C<assert_samerefs([$expect_object1, $expect_object2], [$actual_object1, $actual_object2 ], $descr)>
-
-First two args must be lists, items in the list are compared with
-'=='.  Purpose is for checking a bunch of references point to the
-expected places.
-
-C<$descr> will be set to the calling file:line unless a description is
-given.  Descriptions are prepended to "expected foo, got spong"-style
-failure messages.
-
 =item C<assert_is_idnum($database_id, $descr)>
 
 C<$database_id> must be a plain non-negative integer.
-
-=item C<assert_isa($obj, @isa)>
-
-Assert that C<$obj> is an object and is in B<all> of the classes
-C<@isa>.
 
 =back
 
@@ -739,272 +707,6 @@ Use them by putting C<McaTestCaseTest> in your test suite, otherwise
 they will be compiled but not run.
 
 =cut
-
-
-# Assert that each coderef dies with a message matching the regex
-sub assert_dies {
-    my ($self, $regex, @coderef) = @_;
-
-    # Need to include caller in failure message, since the builtin
-    # line number reporting is no help
-    my @caller = caller();
-    my $caller = "caller at $caller[1] line $caller[2]";
-
-    if (@coderef > 1 && !ref($coderef[-1])) {
-	# Last item isn't code, take it as an extra piece of message
-	$caller .= ", ".pop(@coderef);
-    }
-
-    $self->fail("arg1 not Regexp from $caller") unless ref($regex) eq 'Regexp';
-    $self->fail("Bad args (no coderefs) from $caller") unless @coderef;
-    $self->fail("Bad args (coderefs aren't) from $caller") if grep {ref($_) ne 'CODE'} @coderef;
-
-    for (my $i=0; $i<@coderef; $i++) {
-	eval {
-	    $coderef[$i]->();
-	};
-	my $err = $@;
-	my $which = "";
-	$which = join "", "[", $i+1, " of ", scalar @coderef, "]" if @coderef > 1;
-	$self->fail("Code$which did not die, $caller") unless $err;
-	$self->assert_matches($regex, $err,
-			      "Code$which, $caller:\n  Died with '$err'\n  which didn't match $regex");
-    }
-}
-
-sub McaTestCaseTest::test_assert_dies {
-    my $self = shift;
-
-    # Run our assertion so it should pass, check it ran
-    my $flag = 0;
-    $self->assert_dies(qr/dodo style/, sub { $flag = "captured"; die "dodo style"; });
-    $self->assert_str_equals("captured", $flag);
-
-    ### Use the builtin Test::Unit::Assert to check the assertion fails:
-
-    # doesn't die
-    $self->assert_raises('Test::Unit::Failure',
-			 sub {
-			     $self->assert_dies( qr/wibble/, sub { return 1; });
-			 });
-
-    # wrong args
-    $self->assert_raises('Test::Unit::Failure',
-			 sub {
-			     $self->assert_dies( "foo", sub { return 1; });
-			 });
-    $self->assert_raises('Test::Unit::Failure',
-			 sub {
-			     $self->assert_dies( qr/foo/,
-						 sub { return 1; },
-						 "This is not code",
-						 "Could be a message?");
-			 });
-
-    # multi coderef, second has wrong message
-    $self->assert_raises('Test::Unit::Failure',
-			 sub {
-			     $self->assert_dies( qr/wibble/,
-						 sub { die "wibble" },
-						 sub { die "spong"  });
-			 });
-
-    # multi coderef, third doesn't die
-    $self->assert_raises('Test::Unit::Failure',
-			 sub {
-			     $self->assert_dies( qr/wibble/,
-						 sub { die "eek wibble bonk" },
-						 sub { die "boo wibble spong" },
-						 sub { return 1; });
-			 });
-
-    # old bug check
-    $self->assert_raises('Test::Unit::Failure',
-			 sub {
-			     $self->assert_dies( qr/caller/i,
-						 sub { die "some other thing" } );
-			 });
-
-    # Check the error messages are useful
-    # Working so far, so can use the method under test!
-    $self->assert_dies( qr/Code\[2 of 2\]/,
-			sub {
-			    $self->assert_dies( qr/butter/,
-						sub { die "butterfingers" },
-						sub { die "aiee" });
-			}, sub {
-			    $self->assert_dies( qr/oops/,
-						sub { die "oops" },
-						sub { return 1 });
-			});
-    $self->assert_dies( qr/vital/,
-			sub {
-			    $self->assert_dies( qr/foo/,
-						sub { die "unhelpful message" },
-						"vital piece of info");
-			});
-
-    $self->assert_dies(qr{wantarray check},
-		       sub {
-			   my $T = wantarray_type(wantarray);
-			   die "void context: wantarray check is ok" if $T eq 'void';
-			   $self->fail("expected void context, got $T");
-		       });
-}
-
-
-# Assert that each coderef generates one warning message matching the regex
-sub assert_warns {
-    my ($self, $regex, @coderef) = @_;
-
-    # Need to include caller in failure message, since the builtin
-    # line number reporting is no help
-    my @caller = caller();
-    my $caller = "caller at $caller[1] line $caller[2]";
-
-    if (@coderef > 1 && !ref($coderef[-1])) {
-	# Last item isn't code, take it as an extra piece of message
-	$caller .= ", ".pop(@coderef);
-    }
-
-    $self->fail("arg1 not Regexp from $caller") unless ref($regex) eq 'Regexp';
-    $self->fail("Bad args (no coderefs) from $caller") unless @coderef;
-    $self->fail("Bad args (coderefs aren't) from $caller") if grep {ref($_) ne 'CODE'} @coderef;
-
-    for (my $i=0; $i<@coderef; $i++) {
-	my @warn;
-	{
-	    local $SIG{__WARN__} = sub { push @warn, "@_" };
-	    $coderef[$i]->();
-	}
-	my $which = "";
-	$which = join "", "[", $i+1, " of ", scalar @coderef, "]" if @coderef > 1;
-	$self->fail("Code$which did not warn, $caller") unless @warn;
-	$self->fail("Code$which warned more than once, $caller\n@warn") unless 1 == @warn;
-	$self->assert_matches($regex, $warn[0],
-			      "Code$which, $caller:\n  Warned with '$warn[0]'\n  which didn't match $regex");
-    }
-}
-
-sub McaTestCaseTest::test_assert_warns {
-    my $self = shift;
-
-    my @leaked_warnings;
-    local $SIG{__WARN__} = sub {
-	push @leaked_warnings, "@_";
-	warn @_ unless $_[0] =~ /^Deliberate/;
-    };
-
-    warn "Deliberate leakage of one warning";
-    require Carp; # needed for self-testing only
-
-    my $num = 0;
-    $self->assert_warns(qr{\bfoo\b},
-			sub { $num++; warn "this foo"; return qw( a b c ) },
-			sub { $num++; warn "that foo\n"; return 1 },
-			sub { $num++; Carp::carp "foo applied via Carp module" },
-			sub { $num++; Carp::cluck "foo warning with stacktrace" },
-			sub { $num++; warn "foo the last"; return () });
-    $self->assert_num_equals(5, $num);
-
-    $self->assert_dies(qr{don't trap die},
-		       sub {
-			   $self->assert_warns(qr{warntest}, sub { die "don't trap die" });
-		       });
-
-    $self->assert_raises("Test::Unit::Failure",
-			 sub {
-			     $self->assert_warns
-			       (qr{\bfoo\b}, sub { return "no warning" });
-			 });
-    $self->assert_raises("Test::Unit::Failure",
-			 sub {
-			     $self->assert_warns
-			       (qr{\bfoo\b}, sub { warn "unmatched warning" });
-			 });
-    $self->assert_raises("Test::Unit::Failure",
-			 sub {
-			     $self->assert_warns
-			       (qr{bar},
-				sub { warn "bar bar black sheep" },
-				sub { return "no wool" },
-				sub { die "Last code should not run" });
-			 });
-    $self->assert_raises("Test::Unit::Failure",
-			 sub {
-			     $self->assert_warns
-			       (qr{moof}, sub { warn "first is moofy";
-						warn "second also moofy but unwanted"; });
-			 });
-    $self->assert_raises("Test::Unit::Failure",
-			 sub {
-			     $self->assert_warns
-			       (qr{spong}, sub { warn "spong"; warn "second doesn't" });
-			 });
-
-# XXX: should check that the assert_warns input args are sanitised carefully; this is shared with other asserts and should be tested together or refactored
-    $self->assert_warns(qr{wantarray check},
-			sub {
-			    my $T = wantarray_type(wantarray);
-			    $self->fail("expected void context, got $T") if $T ne 'void';
-			    warn "wantarray check";
-			});
-
-    # Check the 'last arg can be text' thing works
-    $self->assert_dies(qr/vital/,
-		       sub {
-			   $self->assert_warns(qr/foo/,
-					       sub { warn "trivial message" },
-					       "vital piece of info");
-		       });
-
-}
-
-
-# Compare two lists of refs (or numbers) for '==' equality
-sub assert_samerefs {
-    my ($self, $expect_list, $actual_list, $descr, @more) = @_;
-    my @c = caller();
-    $descr = "$c[1]:$c[2]" unless defined $descr;
-
-    $self->assert_str_equals(0, scalar @more, "$descr: too many args");
-    $self->assert_str_equals('ARRAY', ref($expect_list), "$descr: bad expect");
-    $self->assert_str_equals('ARRAY', ref($actual_list), "$descr: bad actual");
-    $self->fail("$descr: compared to itself") if $actual_list == $expect_list;
-    my $en = scalar @$expect_list;
-    my $an = scalar @$actual_list;
-    $self->assert_str_equals($en, $an, "$descr: expect $en, got $an");
-    for (my $i=0; $i<$en; $i++) {
-	my $e = $expect_list->[$i];
-	my $a = $actual_list->[$i];
-	$self->fail("$descr: Items at #$i ($e, $a) not same object")
-	  unless $a == $e;
-    }
-}
-
-sub McaTestCaseTest::test_assert_samerefs {
-    my $self = shift;
-    my @o = ( 34, [ 78 ], { foo => 'bar' } );
-
-    $self->assert_samerefs([ @o ], [ @o ]);
-    $self->assert_samerefs([ @o ], [ @o ], "with message");
-
-    $self->assert_raises('Test::Unit::Failure',
-			 sub {
-			     $self->assert_samerefs( \@o, \@o ); # compare list to itself - weird
-			 });
-
-    $self->assert_raises('Test::Unit::Failure',
-			 sub {
-			     $self->assert_samerefs( \@o, [ ] ); # lists wrong size
-			 });
-
-    $self->assert_raises('Test::Unit::Failure',
-			 sub {
-			     $self->assert_samerefs( \@o, [ 34, [78], $o[2] ] ); # [78] is different
-			 });
-    $self->assert_samerefs( \@o, [ 34, $o[1], $o[2] ] ); # [78] is different
-}
 
 
 sub assert_is_idnum {
@@ -1037,41 +739,6 @@ sub McaTestCaseTest::test_assert_is_idnum {
 }
 
 
-sub assert_isa {
-    my ($self, $obj, @isa) = @_;
-    my @c = caller();
-    my $descr = "$c[1]:$c[2]";
-
-    # Check it's a ref
-    my $what = (defined $obj
-		? (ref($obj) ? ref($obj) : "non-ref")
-		: "undef");
-
-    for (my $i=0; $i<@isa; $i++) {
-	$self->fail("$descr: $what is not a $isa[$i] (isa #$i)") unless UNIVERSAL::isa($obj, $isa[$i]);
-    }
-}
-
-sub McaTestCaseTest::test_assert_isa {
-    my $self = shift;
-    $self->assert_raises('Test::Unit::Failure', sub {
-			     $self->assert_isa(undef, "Foo");
-			 }, "Cope with undef");
-    $self->assert_raises('Test::Unit::Failure', sub {
-			     $self->assert_isa(56, "Foo");
-			 }, "Cope with 56");
-    $self->assert_raises('Test::Unit::Failure', sub {
-			     $self->assert_isa({}, "Foo");
-			 }, "Cope with HASH");
-
-    $self->assert_isa($self, qw(McaTestCase Test::Unit::Assert Test::Unit::Test Test::Unit::TestCase));
-
-    $self->assert_raises('Test::Unit::Failure', sub {
-			     $self->assert_isa($self, qw(Test::Unit::Test Gronk Test::Unit::TestCase));
-			 }, "Cope with wrong class");
-}
-
-
 =head2 mark_skiptest($msg)
 
 Object method for the test, intended to indicate that a test is being
@@ -1087,50 +754,6 @@ sub mark_skiptest {
     my ($self, $msg) = @_;
     my $name = $self->global_test_name;
     warn "\nSkipping test $name: $msg\n ";
-}
-
-
-=head1 EXPORTABLE UTILITY SUBROUTINES
-
-This module also provides subroutines which can be imported in the
-usual way.  This is separate from the object or class method calling
-style.
-
-=head2 wantarray_type($val)
-
-Simple tristate conversion to call as C< my $T =
-wantarray_type(wantarray) > so you can print the callers expectation
-neatly.
-
-=cut
-
-sub wantarray_type {
-    die "expected one arg (the wantarray value), got @_" unless 1 == @_;
-    my $W = shift; # the wantarray value to show
-    return ($W
-	    ? "list"
-	    : (defined $W
-	       ? "scalar"
-	       : "void"));
-}
-
-sub McaTestCaseTest::test_wantarray_type {
-    my $self = shift;
-
-    my $T;
-    my $num = 0;
-    my $code = sub { $T = wantarray_type(wantarray); $num++ };
-
-    $code->("foo");
-    $self->assert_str_equals("void", $T);
-
-    my $junk = $code->(1, 2, 3);
-    $self->assert_str_equals("scalar", $T);
-
-    my @junk = $code->();
-    $self->assert_str_equals("list", $T);
-
-    $self->assert_num_equals(3, $num);
 }
 
 

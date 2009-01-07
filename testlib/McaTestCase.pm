@@ -1072,6 +1072,21 @@ sub McaTestCaseTest::test_assert_isa {
 }
 
 
+sub assert_file_mode {
+    my ($self, $fn, $mode) = @_;
+    my @c = caller();
+    my $descr = "$c[1]:$c[2]";
+
+    my @s = stat $fn;
+    $self->assert_equals($mode, $s[2] & 0777,
+	   sprintf("$descr: %s has mode %04o, expected %04o", $fn, $s[2] & 07777, $mode));
+}
+
+sub McaTestCaseTest::test_assert_file_mode {
+    die "not tested";
+}
+
+
 =head2 mark_skiptest($msg)
 
 Object method for the test, intended to indicate that a test is being

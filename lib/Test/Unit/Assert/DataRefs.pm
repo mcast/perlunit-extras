@@ -104,8 +104,8 @@ sub McaTestCaseTest::test_assert_samerefs {
     $self->assert_samerefs( \@o, [ 34, $o[1], $o[2] ] ); # [78] is different
 }
 
-
-sub assert_isa {
+warn 'assert_isa($obj, @isa) here now falls back to framework\'s assert_isa($obj, $class[, $message])';
+sub assert_isa_many {
     my ($self, $obj, @isa) = @_;
     my @c = caller();
     my $descr = "$c[1]:$c[2]";

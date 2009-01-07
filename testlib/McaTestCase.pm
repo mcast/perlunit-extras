@@ -1,14 +1,16 @@
 
-# Interleaved test methods go in this package, you can add it to your
-# suite or not.
+# Old self-test package
 package McaTestCaseTest;
 our @ISA = qw(McaTestCase);
-# require Carp; # needed for self-testing only
+sub test_mcatestcasetest_gone { $_[0]->fail("McaTestCaseTest class has split") }
 
 
 package McaTestCase;
 
 use strict;
+
+use Test::Unit 0.25; # because 0.24 has broken is_numeric
+
 use base qw( Test::Unit::TestCase Test::Unit::Assert::CodeBehaviour Test::Unit::Assert::DataRefs );
 
 use Data::Dumper;
@@ -721,7 +723,7 @@ sub assert_is_idnum {
     $self->assert_matches(qr/^\d+$/, $id, "$descr: '$id' contains non-numeric");
 }
 
-sub McaTestCaseTest::test_assert_is_idnum {
+sub Test::Unit::Assert::SelfTest::test_assert_is_idnum {
     my $self = shift;
 
     foreach my $id ("0", "634535345345", 5 .. 10) {
@@ -754,28 +756,6 @@ sub mark_skiptest {
     my ($self, $msg) = @_;
     my $name = $self->global_test_name;
     warn "\nSkipping test $name: $msg\n ";
-}
-
-
-=head2 Hack-around for v0.24 C<Test::Unit::Assert::is_numeric> problem
-
-Redefines the subroutine to be more strict.  Hopefully a temporary
-measure.
-
-This fixes the problem described at
-http://sourceforge.net/tracker/index.php?func=detail&aid=1014540&group_id=2653&atid=102653
-(perlunit.sf.net bug number 1014540)
-
-=cut
-
-BEGIN {
-    warn __PACKAGE__, ": Sick bodge over Test::Unit v0.24\n";
-    no warnings;
-    sub Test::Unit::Assert::is_numeric {
-	my $str = shift;
-	local $^W;
-	return defined $str && ! ($str == 0 && $str !~ /^\s*[+-]?0(e0)?\s*$/i);
-    }
 }
 
 

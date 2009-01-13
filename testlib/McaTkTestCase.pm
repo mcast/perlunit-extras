@@ -1,5 +1,4 @@
 package McaTkTestCase;
-# $Id$
 
 use base 'McaTestCase'; # Test::Unit::TestCase with extra toys
 
@@ -146,5 +145,27 @@ sub run_with_timeout {
     $self->bail_check;
 }
 
+
+=head1 AUTHOR
+
+ Copyright (c) 2004, 2005 Genome Research Ltd.
+ Author: Matthew Astley E<lt>mca@sanger.ac.ukE<gt>
+
+This file is part of perlunit-extras.
+
+perlunit-extras  is  free software;  you  can  redistribute it  and/or
+modify  it  under the  terms  of the  GNU  General  Public License  as
+published by  the Free  Software Foundation; either  version 2  of the
+License, or (at your option) any later version.
+
+This program  is distributed in the  hope that it will  be useful, but
+WITHOUT   ANY  WARRANTY;   without  even   the  implied   warranty  of
+MERCHANTABILITY  or FITNESS  FOR A  PARTICULAR PURPOSE.   See  the GNU
+General Public License for more details.
+
+You  should have received  a copy  of the  GNU General  Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=cut
 
 1;

@@ -3,7 +3,6 @@ use strict;
 use Pod::Checker 1.2; # 1.2 with Perl 5.6; 1.4 with Perl 5.8
 use base 'Test::Unit::TestCase';
 
-# $Id$
 our ($VERSION) = (qw$Revision$)[1];
 
 =head1 NAME
@@ -195,6 +194,21 @@ sub get_loaded_files {
 }
 
 =back
+
+=cut
+
+
+=head1 AUTHOR
+
+ Copyright (c) 2004, 2005 Genome Research Ltd.
+ Author: Matthew Astley E<lt>mca@sanger.ac.ukE<gt>
+
+This file is part of perlunit-extras.
+
+perlunit-extras  is  free software;  you  can  redistribute it  and/or
+modify  it  under the  terms  of the  GNU  General  Public License  as
+published by  the Free  Software Foundation; either  version 2  of the
+License, or (at your option) any later version.
 
 =cut
 

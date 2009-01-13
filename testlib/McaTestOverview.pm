@@ -3,7 +3,6 @@ use strict;
 use Pod::Checker 1.2; # 1.2 with Perl 5.6; 1.4 with Perl 5.8
 use base 'Test::Unit::TestCase';
 
-# $Id$
 our ($VERSION) = (qw$Revision$)[1];
 
 =head1 NAME
@@ -198,6 +197,29 @@ sub get_loaded_files {
 
 =cut
 
+
+=head1 AUTHOR
+
+ Copyright (c) 2004, 2005 Genome Research Ltd.
+ Author: Matthew Astley E<lt>mca@sanger.ac.ukE<gt>
+
+This file is part of perlunit-extras.
+
+perlunit-extras  is  free software;  you  can  redistribute it  and/or
+modify  it  under the  terms  of the  GNU  General  Public License  as
+published by  the Free  Software Foundation; either  version 2  of the
+License, or (at your option) any later version.
+
+This program  is distributed in the  hope that it will  be useful, but
+WITHOUT   ANY  WARRANTY;   without  even   the  implied   warranty  of
+MERCHANTABILITY  or FITNESS  FOR A  PARTICULAR PURPOSE.   See  the GNU
+General Public License for more details.
+
+You  should have received  a copy  of the  GNU General  Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+=cut
+
 1;
 
 
@@ -299,3 +321,5 @@ sub READLINE {
     my $list = shift;
     return wantarray ? splice @$list : shift @$list;
 }
+
+1;

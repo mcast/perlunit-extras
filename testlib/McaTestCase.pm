@@ -3,7 +3,7 @@
 # suite or not.
 package McaTestCaseTest;
 our @ISA = qw(McaTestCase);
-# require Carp; # needed for self-testing only
+use Carp;
 
 
 package McaTestCase;
@@ -11,6 +11,8 @@ package McaTestCase;
 use strict;
 use base 'Test::Unit::TestCase';
 
+use Carp;
+use YAML 'LoadFile'; # for data_for_test only
 use Data::Dumper;
 use B 'svref_2object';
 use Scalar::Util qw(weaken isweak);
@@ -894,14 +896,13 @@ sub McaTestCaseTest::test_assert_warns {
     };
 
     warn "Deliberate leakage of one warning";
-    require Carp; # needed for self-testing only
 
     my $num = 0;
     $self->assert_warns(qr{\bfoo\b},
 			sub { $num++; warn "this foo"; return qw( a b c ) },
 			sub { $num++; warn "that foo\n"; return 1 },
-			sub { $num++; Carp::carp "foo applied via Carp module" },
-			sub { $num++; Carp::cluck "foo warning with stacktrace" },
+			sub { $num++; carp "foo applied via Carp module" },
+			sub { $num++; cluck "foo warning with stacktrace" },
 			sub { $num++; warn "foo the last"; return () });
     $self->assert_num_equals(5, $num);
 
@@ -1100,6 +1101,42 @@ sub mark_skiptest {
     my ($self, $msg) = @_;
     my $name = $self->global_test_name;
     warn "\nSkipping test $name: $msg\n ";
+}
+
+
+=head2 data_for_test()
+
+Object method for the test.  Generate a filename from the calling test
+and load L<YAML> from it.  Return the data.
+
+In list context, returns all the items in the file.  In scalar
+context, returns the item in the file iff there is one.  Confesses
+otherwise.
+
+For a test method C<My::TestCase-E<gt>test_thing>, currently data is
+expected at C<test_thing.yaml> in the same directory as the source for
+C<My::TestCase>.  This will likely be extended to look in other
+places, and error if not exactly one data file can be found.
+
+XXX: no self-test
+
+=cut
+
+sub data_for_test {
+    my $self = shift;
+    my (undef, $testcode_filename, undef) = caller();
+    my $testname = $self->name;
+
+    my $fn = $testcode_filename;
+    $fn =~ s{[^/]+\.pm$}{};
+    $fn .= "$testname.yaml";
+
+    my @data = LoadFile($fn);
+
+    return @data if wantarray;
+    return $data[0] if 1 == @data;
+    my $num = @data;
+    confess "Called in scalar context, but have $num data items";
 }
 
 

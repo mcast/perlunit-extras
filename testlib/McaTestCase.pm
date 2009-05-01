@@ -902,7 +902,7 @@ sub McaTestCaseTest::test_assert_warns {
 			sub { $num++; warn "this foo"; return qw( a b c ) },
 			sub { $num++; warn "that foo\n"; return 1 },
 			sub { $num++; carp "foo applied via Carp module" },
-			sub { $num++; cluck "foo warning with stacktrace" },
+			sub { $num++; Carp::cluck "foo warning with stacktrace" },
 			sub { $num++; warn "foo the last"; return () });
     $self->assert_num_equals(5, $num);
 
@@ -1117,8 +1117,6 @@ For a test method C<My::TestCase-E<gt>test_thing>, currently data is
 expected at C<test_thing.yaml> in the same directory as the source for
 C<My::TestCase>.  This will likely be extended to look in other
 places, and error if not exactly one data file can be found.
-
-XXX: no self-test
 
 =cut
 
